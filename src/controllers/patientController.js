@@ -325,7 +325,7 @@ export const addMaterial = async (req, res, next) => {
     const dest = path.join(MATERIALS_DIR, filename);
     fs.renameSync(req.file.path, dest);                    // <- move
 
-    const fileUrl = `/uploads/materials/${filename}`;      // ← static mount
+    const fileUrl = `${req.protocol}://${req.get('host')}/uploads/materials/${filename}`;     // ← static mount
 
     /* ---------- save in embedded materials array ---------- */
     const update = {

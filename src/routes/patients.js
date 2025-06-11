@@ -74,5 +74,12 @@ router.patch('/:id/goal-progress/history', requireAuth, addGoalHistory);
 router.patch("/:id/goal-progress", requireAuth, updateGoalProgress);
 router.get ("/:id/materials",   requireAuth,            listMaterials);
 router.post("/:id/materials",   requireAuth, upload.single("file"), addMaterial);
+router.patch(
+  '/:id', 
+  requireAuth,
+  uploader.single('avatar'),
+  [nameV, runValidation],
+  update
+);
 
 export default router;

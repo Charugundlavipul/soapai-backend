@@ -1,5 +1,6 @@
 import bcrypt from 'bcryptjs';
 import Slp from '../models/Slp.js';
+import fs      from "fs"; 
 
 export const getProfile = (req, res) => {
   res.json({

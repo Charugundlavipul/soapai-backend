@@ -91,3 +91,20 @@ export const update = async (req, res, next) => {
   }
 };
 
+// server/src/controllers/annualGoalController.js
+export const deleteCategory = async (req, res, next) => {
+  try {
+    const { id } = req.params;        // :id in the route
+    const cat = await AnnualGoalCategory.findOneAndDelete({
+      _id: id,
+      slp: req.user._id               // make sure category belongs to this SLP
+    });
+    if (!cat) {
+      return res.status(404).json({ message: "Category not found" });
+    }
+    res.json({ ok: true });
+  } catch (e) {
+    next(e);
+  }
+};
+
