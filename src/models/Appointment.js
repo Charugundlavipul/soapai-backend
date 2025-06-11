@@ -28,7 +28,30 @@ const AppointmentSchema = new Schema({
     type: Schema.Types.ObjectId,
     ref: "Recommendation",
     default: null
-  }
+  },
+    /* ---------- session outcomes ---------- */
+  aiInsights: [                        // generic list (works for group OR individual)
+    {
+      time:     String,
+      text:     String,
+      tag:      String,
+      tagColor: String
+    }
+  ],
+
+  activities: [
+    {
+      description:   String,
+      evidence:      String,
+      materialUrl:   String,
+      recommended:   Boolean,
+      /* per-patient score when it’s a group activity */
+      performanceScores: [{
+        patient: { type: Schema.Types.ObjectId, ref: 'Patient' },
+        score:   Number      // 1-5
+      }]
+    }
+  ]
 }, { timestamps: true });
 
 export default model("Appointment", AppointmentSchema);

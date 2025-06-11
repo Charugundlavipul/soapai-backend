@@ -107,3 +107,27 @@ export const remove = async (req, res, next) => {
     res.json({ ok: true });
   } catch (e) { next(e); }
 };
+
+// Add this function to groupController.js
+
+export const updateGoals = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { goals } = req.body; // should be array of strings
+
+    if (!Array.isArray(goals))
+      return res.status(400).json({ message: "Goals must be an array" });
+
+    const group = await Group.findOneAndUpdate(
+      { _id: id, slp: req.user._id },
+      { goals },
+      { new: true }
+    );
+
+    if (!group) return res.status(404).json({ message: "Group not found" });
+    res.json(group);
+  } catch (e) {
+    next(e);
+  }
+};
+

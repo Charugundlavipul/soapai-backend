@@ -13,7 +13,7 @@ const VideoSchema = new Schema({
   title:        { type: String, required: true },
   appointment:  { type: Schema.Types.ObjectId, ref: 'Appointment', required: true },
   slp:          { type: Schema.Types.ObjectId, ref: 'Slp', required: true },
-  behaviours:   [{ type: Schema.Types.ObjectId, ref: 'Behaviour' }],
+  goals:        [{ type: String }], 
   notes:        String,
   fileUrl:      String,
   transcript: [Utterance],       // /uploads/abc.mp4

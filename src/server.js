@@ -14,8 +14,9 @@ import profileRoutes from './routes/profile.js';
 import videoRoutes from './routes/videos.js';
 import chatRoutes from './routes/chat.js';
 import recommendationsRouter from "./routes/recommendations.js";
+import annualGoalsRoutes from "./routes/annualGoals.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-
+const UPLOAD_ROOT = path.resolve("uploads");  
 
 
 dotenv.config();
@@ -24,6 +25,8 @@ const port = process.env.PORT || 4000;
 
 app.use(cors());          // allow React dev server
 app.use(express.json());
+    // same path we used in controller
+app.use("/uploads", express.static(path.resolve("uploads")));
 
 app.use('/api/auth', authRoutes);
 app.get('/ping', (_r, res) => res.send('pong'));
@@ -40,6 +43,8 @@ app.use(
 app.use('/api/profile', profileRoutes);
 app.use('/api/behaviours', behaviourRoutes);
 app.use('/api', videoRoutes);
+app.use('/api/videos', videoRoutes); 
+app.use("/api/annual-goals", annualGoalsRoutes); 
 
 app.use(errorHandler);
 app.use('/api/chat', chatRoutes);

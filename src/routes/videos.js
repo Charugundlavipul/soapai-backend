@@ -1,8 +1,9 @@
 // server/src/routes/videos.js
 import { Router }             from "express";
-import { create, uploadMulter, getOne ,updateBehaviours} from "../controllers/videoController.js";
+import { create, uploadMulter, getOne } from "../controllers/videoController.js";
 import { requireAuth }        from "../middlewares/requireAuth.js";
 import Video from "../models/Video.js";
+import { updateGoals } from "../controllers/videoController.js"; // Import the updateGoals function
 
 const router = Router();
 
@@ -19,11 +20,7 @@ router.get(
   getOne
 );
 
-router.patch("/videos/:id/behaviours",
-             requireAuth,
-             updateBehaviours);
-
-             router.get(
+router.get(
   "/videos/:id/transcript",
   requireAuth,
   async (req, res, next) => {
@@ -38,5 +35,6 @@ router.patch("/videos/:id/behaviours",
   }
 );
 
+router.patch('/:id/goals', requireAuth, updateGoals);
 
 export default router;
