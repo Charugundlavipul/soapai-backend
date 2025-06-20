@@ -281,6 +281,15 @@ export const addVisitHistory = async (req, res, next) => {
     }
 
     // 1) Find the patient document
+        /* ---------- sanitise activities ---------- */
+    if (Array.isArray(visit.activities)) {
+      visit.activities = visit.activities
+        .map((a) => (typeof a === "string" ? a : a?._id))   // keep only id
+        .filter(Boolean);                                   // remove nulls
+    } else {
+      visit.activities = [];
+    }
+    
     const patient = await Patient.findOne({ _id: id, slp: req.user._id });
     if (!patient) {
       return res.status(404).json({ message: "Patient not found" });

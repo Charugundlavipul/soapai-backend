@@ -2,6 +2,10 @@
 import mongoose from "mongoose";
 const { Schema, model } = mongoose;
 
+
+
+
+
 const AppointmentSchema = new Schema({
   slp:   { type: Schema.Types.ObjectId, ref: "Slp", required: true },
 
@@ -38,20 +42,11 @@ const AppointmentSchema = new Schema({
       tagColor: String
     }
   ],
+   activities: [{                     //  just keep the ObjectId refs
+    type: Schema.Types.ObjectId,
+    ref:  "Activity"
+  }],
 
-  activities: [
-    {
-      description:   String,
-      evidence:      String,
-      materialUrl:   String,
-      recommended:   Boolean,
-      /* per-patient score when it’s a group activity */
-      performanceScores: [{
-        patient: { type: Schema.Types.ObjectId, ref: 'Patient' },
-        score:   Number      // 1-5
-      }]
-    }
-  ]
 }, { timestamps: true });
 
 export default model("Appointment", AppointmentSchema);

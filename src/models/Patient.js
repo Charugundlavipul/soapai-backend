@@ -26,7 +26,10 @@ const VisitSchema = new Schema({
       color: String,
     }
   ],
-  activities: [ActivitySchema]
+    activities: [{
+    type: Schema.Types.ObjectId,
+    ref:  "Activity"
+  }],
 }, { _id: false });
 
 // One “material” (file) entry tied to a particular visit

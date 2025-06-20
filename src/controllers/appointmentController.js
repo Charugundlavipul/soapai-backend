@@ -13,17 +13,45 @@ const computeStatus = (start, end) => {
 
 export const create = async (req, res, next) => {
   try {
-    const body = { ...req.body, slp: req.user._id };
-    body.status = computeStatus(new Date(body.dateTimeStart), new Date(body.dateTimeEnd));
+    const {
+      type,                // "group" | "individual"
+      group,               // ObjectId  (when type === "group")
+      patient,             // ObjectId  (when type === "individual")
+      dateTimeStart,
+      dateTimeEnd,
+    } = req.body;
 
-    let appt = await Appointment.create(body);
-    appt = await appt.populate([
-      { path: 'group', select: 'name' },
-      { path: 'patient', select: 'name' }
-    ]);
+    /* 1️⃣  create the appointment itself */
+    const appt = await Appointment.create({
+      ...req.body,
+      slp: req.user._id,
+    });
+
+    /* 2️⃣  link ↔ group / patient collections so it’s easy to query later */
+    if (type === "group") {
+      /* 2a ‒ save the id on the Group doc */
+      await Group.findByIdAndUpdate(group, {
+        $addToSet: { appointments: appt._id },
+      });
+
+      /* 2b ‒ push into every patient who belongs to that group */
+      const grp = await Group.findById(group, "patients");
+      if (grp?.patients?.length) {
+        await Patient.updateMany(
+          { _id: { $in: grp.patients } },
+          { $addToSet: { appointments: appt._id } }
+        );
+      }
+    } else {
+      /* individual session → just the one patient */
+      await Patient.findByIdAndUpdate(patient, {
+        $addToSet: { appointments: appt._id },
+      });
+    }
+
     res.status(201).json(appt);
-  } catch (e) {
-    next(e);
+  } catch (err) {
+    next(err);
   }
 };
 
@@ -125,6 +153,7 @@ export const getOne = async (req, res, next) => {
     // Only allow the SLP who owns it to fetch
     const appt = await Appointment.findOne({ _id: id, slp: req.user._id })
       .populate('group', 'name')
+      .populate('activities', 'name description materials createdAt members')
       .populate('patient', 'name')
       .populate('video', '_id')
       .populate({

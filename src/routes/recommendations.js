@@ -4,7 +4,7 @@ import {
   createRecommendation,
   getRecommendation,
 } from "../controllers/recommendationController.js";
-import { generateActivity } from "../controllers/activityController.js";
+import { generateActivity,generateActivityDraft } from "../controllers/activityController.js";
 import { requireAuth } from "../middlewares/requireAuth.js";
 
 const router = Router();
@@ -21,11 +21,5 @@ router.get(
   getRecommendation
 );
 
-/* activity generator (Gemini) */
-router.post(
-  "/appointments/:id/generate-activity",
-  requireAuth,
-  generateActivity
-);
 
 export default router;
