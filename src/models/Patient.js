@@ -58,6 +58,7 @@ const PatientSchema = new Schema({
   name:         { type: String, required: true },
   age:          { type: Number },
   address:      { type: String },
+  grade:        { type: String, default: "" },
   pastHistory:  { type: [String], default: [] },
   avatarUrl:    { type: String, default: "" },
   visitHistory: { type: [VisitSchema], default: [] },
@@ -66,7 +67,22 @@ const PatientSchema = new Schema({
   group:        { type: Schema.Types.ObjectId, ref: 'Group', default: null },
   goals:        { type: [String], default: [] },
   goalProgress: { type: [GoalProgressSchema], default: [] },
-  appointments: { type: [Schema.Types.ObjectId], ref: 'Appointment', default: [] },
+  appointments: { type: [Schema.Types.ObjectId], ref: 'Appointment', default: [] },   
+  attendance: {
+    type: [
+      {
+        appointment: { type: Schema.Types.ObjectId, ref: "Appointment", required:true },
+        date:        { type: Date, required: true },
+        status: {
+          type: String,
+          enum: ["not-started", "present", "absent"],
+          default: "not-started",
+        },
+        progress: { type: Number, default: 0 }, // e.g. 50% done
+      },
+    ],
+    default: [],
+  },
 }, { timestamps: true });
 
 export default model('Patient', PatientSchema);

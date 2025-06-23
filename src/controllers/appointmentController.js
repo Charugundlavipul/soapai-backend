@@ -41,11 +41,32 @@ export const create = async (req, res, next) => {
           { _id: { $in: grp.patients } },
           { $addToSet: { appointments: appt._id } }
         );
+      const attendanceRow = {
+        appointment: appt._id,
+        date:        dateTimeStart,   // ← add the start date
+        status:      "not-started",
+      };
+      await Patient.updateMany(
+        { _id: { $in: grp.patients } },
+        {
+          $addToSet: { appointments: appt._id },
+          $push:     { attendance: attendanceRow },
+        }
+      );
       }
     } else {
       /* individual session → just the one patient */
       await Patient.findByIdAndUpdate(patient, {
         $addToSet: { appointments: appt._id },
+      });
+      const attendanceRow = {
+        appointment: appt._id,
+        date:        dateTimeStart,   // ← add the start date
+        status:      "not-started",
+      };
+      await Patient.findByIdAndUpdate(patient, {
+        $addToSet: { appointments: appt._id },
+        $push:     { attendance: attendanceRow },
       });
     }
 
@@ -124,6 +145,14 @@ export const update = async (req, res, next) => {
       updateDoc,
       { new: true }
     ).populate('group', 'name').populate('patient', 'name');
+
+       if (appt && dateTimeStart) {
+     await Patient.updateMany(
+       { attendance: { $elemMatch: { appointment: appt._id } } },
+       { $set: { "attendance.$[elem].date": dateTimeStart } },
+       { arrayFilters: [ { "elem.appointment": appt._id } ] }
+     );
+   }
 
     if (!appt) return res.status(404).json({ message: 'Not found' });
 

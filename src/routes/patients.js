@@ -13,7 +13,8 @@ import {
   addMaterial,
   updateGoalProgress,
   addGoalHistory,
-  listMaterials
+  listMaterials,
+  updateAttendanceStatus
   
 } from '../controllers/patientController.js';
 import multer from 'multer';
@@ -70,6 +71,9 @@ router.post(
   uploader.single('file'),
   addMaterial
 );
+// server/src/routes/patientRoutes.js
+router.patch("/:id/attendance/:apptId", requireAuth, updateAttendanceStatus);
+
 router.patch('/:id/goal-progress/history', requireAuth, addGoalHistory);
 router.patch("/:id/goal-progress", requireAuth, updateGoalProgress);
 router.get ("/:id/materials",   requireAuth,            listMaterials);

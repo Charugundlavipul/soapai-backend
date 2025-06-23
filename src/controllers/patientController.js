@@ -172,7 +172,7 @@ export const update = async (req, res, next) => {
     }
 
     // Only allow updating these fields
-    const updatable = ['name', 'age', 'address', 'pastHistory', 'goals', 'group'];
+    const updatable = ['name', 'age', 'address', 'pastHistory', 'goals', 'group','grade', 'avatarUrl'];     
     updatable.forEach(field => {
       if (req.body[field] !== undefined) {
         patient[field] = req.body[field];
@@ -416,4 +416,22 @@ export const addGoalHistory = async (req,res,next)=>{
   });
   await pat.save();
   res.json(pat.goalProgress);
+};
+
+// server/src/controllers/patientController.js
+export const updateAttendanceStatus = async (req, res, next) => {
+  try {
+    const { id, apptId }   = req.params;
+    const { status }       = req.body;                 // "present" | "absent"
+    if (!["present", "absent"].includes(status))
+      return res.status(400).json({ message: "Invalid status" });
+
+    const pat = await Patient.findOneAndUpdate(
+      { _id: id, "attendance.appointment": apptId, slp: req.user._id },
+      { $set: { "attendance.$.status": status } },
+      { new: true, select: "attendance" }
+    );
+    if (!pat) return res.status(404).json({ message: "Not found" });
+    res.json(pat.attendance);
+  } catch (e) { next(e); }
 };
