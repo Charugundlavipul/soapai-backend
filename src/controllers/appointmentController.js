@@ -4,6 +4,7 @@ import { isBefore, isWithinInterval } from 'date-fns';
 import Group from '../models/Group.js';
 import Patient from '../models/Patient.js';
 
+
 const computeStatus = (start, end) => {
   const now = new Date();
   if (isWithinInterval(now, { start, end })) return 'ongoing';
@@ -162,15 +163,65 @@ export const update = async (req, res, next) => {
   }
 };
 
-/* ─ DELETE /api/appointments/:id ─ */
+
+/**
+ * DELETE  /api/appointments/:id
+ * --------------------------------------------
+ * 1. delete the appointment
+ * 2. pull it out of the group's .appointments[]
+ * 3. if no appointments remain:
+ *      – delete the group
+ *      – clear group ref on members
+ *      – remove avatar file (if local)
+ */
 export const remove = async (req, res, next) => {
   try {
+    const { id } = req.params;
+
+    /* 1️⃣  locate & delete the appointment -------------------- */
     const appt = await Appointment.findOneAndDelete({
-      _id: req.params.id,
-      slp: req.user._id
-    });
-    if (!appt) return res.status(404).json({ message: 'Not found' });
-    res.json({ ok: true });
+      _id: id,
+      slp: req.user._id,
+    }).populate("group", "patients avatarUrl slp");
+    if (!appt) return res.status(404).json({ message: "Not found" });
+
+    /* 2️⃣  if this appointment belonged to a group … ---------- */
+    if (appt.group) {
+      const gId = appt.group._id;
+
+      // pull the id out of the array (in case you store it there)
+      await Group.updateOne({ _id: gId }, { $pull: { appointments: id } });
+
+      // how many appointments are still tied to that group?
+      const remaining = await Appointment.countDocuments({ group: gId });
+
+      /* 3️⃣  if there are **zero** left, delete the group too -- */
+      if (remaining === 0) {
+        const grp = await Group.findOneAndDelete({
+          _id: gId,
+          slp: req.user._id,
+        });
+
+        if (grp) {
+          /* unlink local avatar file (if any) */
+          if (grp.avatarUrl?.startsWith("http")) {
+            const local = grp.avatarUrl.replace(
+              `${req.protocol}://${req.get("host")}`,
+              "."
+            );
+            if (fs.existsSync(local)) fs.unlinkSync(local);
+          }
+
+          /* clear group on each patient ----------------------- */
+          await Patient.updateMany(
+            { _id: { $in: grp.patients } },
+            { $unset: { group: "" } }
+          );
+        }
+      }
+    }
+
+    return res.json({ ok: true });
   } catch (e) {
     next(e);
   }
@@ -204,4 +255,50 @@ export const getOne = async (req, res, next) => {
   } catch (err) {
     next(err);
   }
+};
+
+/* POST  /api/appointments/bulk
+   body: { appointments:[ { type, group, patient, dateTimeStart, dateTimeEnd } ] }
+*/
+export const createBulk = async (req,res,next)=>{
+  try{
+    const { appointments=[] } = req.body;
+    if(!Array.isArray(appointments) || appointments.length===0)
+      return res.status(400).json({ message:"appointments[] required" });
+
+    /* reuse the existing create() logic for each row */
+    const created = [];
+    for (const payload of appointments){
+      const aReq = { ...payload, slp:req.user._id };
+      const appt = await Appointment.create(aReq);
+
+      /* --- backlink group / patient (same as single create) ---- */
+      if (payload.type==="group" && payload.group){
+        await Group.findByIdAndUpdate(payload.group,
+            { $addToSet:{ appointments: appt._id }});
+        const grp = await Group.findById(payload.group,"patients");
+        if(grp?.patients?.length){
+          await Patient.updateMany(
+            { _id:{ $in: grp.patients } },
+            { $addToSet:{ appointments: appt._id },
+              $push:{ attendance:{
+                appointment: appt._id,
+                date: payload.dateTimeStart,
+                status:"not-started"} } }
+          );
+        }
+      }else if(payload.type==="individual" && payload.patient){
+        await Patient.findByIdAndUpdate(payload.patient,{
+          $addToSet:{ appointments: appt._id },
+          $push:{ attendance:{
+            appointment: appt._id,
+            date: payload.dateTimeStart,
+            status:"not-started"} }
+        });
+      }
+      created.push(appt);
+    }
+
+    res.status(201).json(created);
+  }catch(e){ next(e); }
 };

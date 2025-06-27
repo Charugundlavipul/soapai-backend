@@ -210,26 +210,30 @@ Return ONLY valid JSON with exactly these keys:
 --------------------------------------------------------------- */
 import Activity from "../models/Activity.js";   // ← add at the top of file
 
+// controllers/appointmentController.js (or wherever it lives)
 export const generateActivity = async (req, res, next) => {
   try {
-    /* ---------- request values ---------- */
+    /* ---------- request fields ---------- */
     const { id: apptId } = req.params;
     const {
-      memberIds   = [],
-      goals       = [],
-      duration    = "",
-      idea        = "",
-      materials   = [],
-      activityName = ""
+      memberIds    = [],
+      goals        = [],
+      duration     = "",
+      idea         = "",
+      materials    = [],
+      activityName = "",
+      preview      = false          // 👈  NEW
     } = req.body;
 
     /* ---------- load appointment ---------- */
     const appt = await Appointment.findById(apptId)
       .populate("group",   "patients")
       .populate("patient", "name");
-    if (!appt) return res.status(404).json({ message: "Appointment not found" });
+    if (!appt) {
+      return res.status(404).json({ message: "Appointment not found" });
+    }
 
-    /* ---------- build Gemini prompt ---------- */
+    /* ---------- craft Gemini prompt ---------- */
     const safeNotes = buildVisitNotes(appt, memberIds);
     const heading   = activityName ? `### ${activityName}\n` : "";
 
@@ -253,21 +257,23 @@ ${safeNotes}
 Return the plan in **Markdown**:
 
 ### Activity Name
-<should be “${activityName}”>
+<should be “${activityName || "Generated Activity"}”>
 
 ### Requirements
 - <each material>
 
 ### Instructions
-1. …
-`.trim();
+1. …`.trim();
 
     /* ---------- call Gemini ---------- */
     const gemBody = { contents: [{ parts: [{ text: promptText }] }] };
     const gRes = await fetch(
       `${GEMINI_ENDPOINT}?key=${process.env.GEMINI_KEY}`,
-      { method: "POST", headers:{ "Content-Type":"application/json" },
-        body: JSON.stringify(gemBody) }
+      {
+        method  : "POST",
+        headers : { "Content-Type":"application/json" },
+        body    : JSON.stringify(gemBody)
+      }
     );
 
     const gJson = await gRes.json();
@@ -275,30 +281,33 @@ Return the plan in **Markdown**:
 
     const plan = gJson.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
 
-    /* ---------- create Activity doc ---------- */
+    /* ---------- PREVIEW-ONLY branch ---------- */
+    if (preview) {
+      return res.json({ plan });   // nothing persisted
+    }
+
+    /* ---------- PERSIST branch (old behaviour) ---------- */
     const activity = await Activity.create({
-      slp:   appt.slp,
-      name:  activityName || "Generated Activity",
+      slp        : appt.slp,
+      name       : activityName || "Generated Activity",
       description: plan,
       materials,
-      members: memberIds,
+      members    : memberIds,
       goals
     });
 
-    /* ---------- reference it ---------- */
     await Appointment.updateOne(
       { _id: apptId },
       { $addToSet: { activities: activity._id } }
     );
+
     await addActRefToPatients(appt, activity._id);   // helper from earlier
 
-    /* ---------- respond ---------- */
-    res.json({ plan, activity });
+    return res.json({ plan, activity });
   } catch (err) {
     next(err);
   }
 };
-
 
 /* ------------------------------------------------------------------
    3.  PATCH /api/appointments/:aid/activities/:actId
