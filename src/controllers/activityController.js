@@ -37,6 +37,24 @@ const buildVisitNotes = (appt, ids = []) => {
     : `### No specific members selected\n${PLACEHOLDER_NOTE}`;
 };
 
+const buildPatientStgs = async (appt, ids = []) => {
+  const pids = await getPatientIds(appt);
+
+  const map = new Map();              // pid → stgText | ""
+  const pats = await Patient.find({ _id: { $in: pids } }, "stgs");
+
+  pats.forEach(p => {
+    const row = p.stgs?.find(
+      s => String(s.appointment) === String(appt._id)
+    );
+    map.set(String(p._id), row?.text || "");
+  });
+
+  const chunks = ids.map(id => map.get(String(id)) || "");
+  return chunks.join("\n\n").trim() ||
+         "Therapist has not entered visit notes yet.";
+};
+
 const getPatientIds = async (appt) => {
   if (appt.type === "group") {
     if (appt.group?.patients) return appt.group.patients;
@@ -155,7 +173,7 @@ export const generateActivityDraft = async (req, res, next) => {
     if (!appt)
       return res.status(404).json({ message: "Appointment not found" });
 
-    const safeNotes = buildVisitNotes(appt, memberIds);
+    const safeNotes = await buildPatientStgs(appt, memberIds);
 
     const prompt = `
 You are a speech-language therapy assistant.
@@ -234,7 +252,7 @@ export const generateActivity = async (req, res, next) => {
     }
 
     /* ---------- craft Gemini prompt ---------- */
-    const safeNotes = buildVisitNotes(appt, memberIds);
+    const safeNotes = await buildPatientStgs(appt, memberIds);
     const heading   = activityName ? `### ${activityName}\n` : "";
 
     const promptText = `
@@ -250,7 +268,7 @@ ${idea ? `Therapist’s idea / focus: ${idea}` : ""}
 • Target goals: ${goals.length ? goals.join(", ") : "general communication"}
 ${materials.length ? `• Use ONLY these materials: ${materials.join(", ")}` : ""}
 
---- VISIT NOTES ---
+--- Short Term Goals of Patients ---
 ${safeNotes}
 ---------------------
 

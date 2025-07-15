@@ -2,17 +2,6 @@
 import mongoose from 'mongoose';
 const { Schema, model } = mongoose;
 
-/* ─── Sub‐schemas ─── */
-
-const ActivitySchema = new Schema({
-  name:        { type: String, required: true },
-  description: { type: String, default: "" },
-  evidence:    { type: String, default: "" },
-  recommended: { type: Boolean, default: false },
-  score:       { type: Number },
-  associatedGoals: [String],
-}, { _id: false });
-
 // One “visit” entry in visitHistory
 const VisitSchema = new Schema({
   date:        { type: Date, required: true },
@@ -62,6 +51,19 @@ const PatientSchema = new Schema({
   pastHistory:  { type: [String], default: [] },
   avatarUrl:    { type: String, default: "" },
   visitHistory: { type: [VisitSchema], default: [] },
+    stgs: {
+    type: [
+      {
+        appointment: {
+          type     : Schema.Types.ObjectId,
+          ref      : "Appointment",
+          required : true,
+        },
+        text: { type: String, required: true },
+      },
+    ],
+    default: [],
+  },
   materials:    { type: [MaterialSchema], default: [] },
   slp:          { type: Schema.Types.ObjectId, ref: 'Slp', required: true },
   group:        { type: Schema.Types.ObjectId, ref: 'Group', default: null },

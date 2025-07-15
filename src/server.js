@@ -13,6 +13,7 @@ import behaviourRoutes from './routes/behaviours.js';
 import profileRoutes from './routes/profile.js';
 import videoRoutes from './routes/videos.js';
 import chatRoutes from './routes/chat.js';
+import stgRoutes from './routes/stgRoutes.js';  // for generating STG
 import recommendationsRouter from "./routes/recommendations.js";
 import annualGoalsRoutes from "./routes/annualGoals.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -46,9 +47,11 @@ app.use('/api', videoRoutes);
 app.use('/api/videos', videoRoutes); 
 app.use("/api/annual-goals", annualGoalsRoutes); 
 
+
 app.use(errorHandler);
 app.use('/api/chat', chatRoutes);
 app.use("/api", recommendationsRouter);
+app.use('/api',            stgRoutes); 
 
 mongoose.connect(process.env.MONGO_URI)
   .then(() => {

@@ -4,7 +4,7 @@
   "type": "module",
   "main": "index.js",
   "scripts": {
-    "dev": "nodemon src/server.js"
+    "dev": "nodemon --inspect src/server.js"
   },
   "keywords": [],
   "author": "",
@@ -21,7 +21,7 @@
     "cors": "^2.8.5",
     "crypto-random-string": "^5.0.0",
     "date-fns": "^4.1.0",
-    "dotenv": "^16.5.0",
+    "dotenv": "^16.6.1",
     "express": "^5.1.0",
     "express-validator": "^7.2.1",
     "ffmpeg-static": "^5.2.0",
@@ -29,6 +29,7 @@
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.15.0",
     "multer": "^2.0.0",
+    "neo4j-driver": "^5.28.1",
     "node-fetch": "^3.3.2",
     "nodemailer": "^7.0.3",
     "rechart": "^0.0.1"

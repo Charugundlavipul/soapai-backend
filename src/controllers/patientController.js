@@ -6,6 +6,7 @@ import Group   from '../models/Group.js';
 import Slp     from '../models/Slp.js';
 import Appointment from '../models/Appointment.js';
 import Material from "../models/Material.js";
+import mongoose from "mongoose"; 
 
 /* ───────── absolute path for uploads/materials ───────── */
 const MATERIALS_DIR = path.join(process.cwd(), "uploads", "materials");
@@ -273,42 +274,52 @@ export const updateGoals = async (req, res, next) => {
 
 export const addVisitHistory = async (req, res, next) => {
   try {
-    const { id } = req.params;         // patient ID
-    const { visit } = req.body;       // visit = { date, appointment, type, aiInsights, activities }
+    const { id }    = req.params;   // patient id
+    const { visit } = req.body;     // { date, appointment, type, … }
 
-    if (!visit || !visit.date || !visit.type || !visit.appointment) {
+    /* ---- basic validation ---- */
+    if (!visit?.date || !visit?.type || !visit?.appointment) {
       return res.status(400).json({ message: "Incomplete visit data" });
     }
 
-    // 1) Find the patient document
-        /* ---------- sanitise activities ---------- */
+    /* ---- normalise fields ---- */
+   if (typeof visit.appointment === "string") {
+  // cast to string first so TS knows it isn’t a number
+  visit.appointment = mongoose.Types.ObjectId.createFromHexString(
+    String(visit.appointment)
+  );
+}
     if (Array.isArray(visit.activities)) {
       visit.activities = visit.activities
-        .map((a) => (typeof a === "string" ? a : a?._id))   // keep only id
-        .filter(Boolean);                                   // remove nulls
+        .map(a => (typeof a === "string" ? a : a?._id))
+        .filter(Boolean);
     } else {
       visit.activities = [];
     }
-    
-    const patient = await Patient.findOne({ _id: id, slp: req.user._id });
-    if (!patient) {
-      return res.status(404).json({ message: "Patient not found" });
-    }
 
-    // 2) Remove any existing visit entry for the same appointment
-    patient.visitHistory = patient.visitHistory.filter(
-      (vh) => String(vh.appointment) !== String(visit.appointment)
-    );
+    /* ---- atomic update (no optimistic-lock) ---- */
+       const session = await mongoose.startSession();
+    let out;
+    await session.withTransaction(async () => {
+      // 1️⃣ remove any existing row for this appointment
+      await Patient.updateOne(
+        { _id: id, slp: req.user._id },
+        { $pull: { visitHistory: { appointment: visit.appointment } } },
+        { session }
+      );
 
-    // 3) Push the new visit object
-    patient.visitHistory.push(visit);
+      // 2️⃣ append the fresh row
+      out = await Patient.findOneAndUpdate(
+        { _id: id, slp: req.user._id },
+        { $push: { visitHistory: visit } },
+        { new: true, projection: { visitHistory: 1 }, session }
+      );
+    });
+    session.endSession();
 
-    // 4) Save and return the updated patient
-    await patient.save();
-    res.json(patient);
-  } catch (e) {
-    next(e);
-  }
+    if (!out) return res.status(404).json({ message: "Patient not found" });
+    res.json(out);
+  } catch (err) { next(err); }
 };
 
 export const addMaterial = async (req, res, next) => {

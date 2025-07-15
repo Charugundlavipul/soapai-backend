@@ -21,7 +21,8 @@ import multer from 'multer';
 import { runValidation } from '../middlewares/validate.js';
 import { requireAuth }   from '../middlewares/requireAuth.js';
 import { uploader }      from '../middlewares/upload.js';
-
+import mongoose from "mongoose";
+const { Types } = mongoose;
 const router = Router();
 const upload = multer({ dest: "uploads" });
 
