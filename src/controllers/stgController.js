@@ -1,54 +1,109 @@
-// server/src/controllers/stgController.js
+/*  server/src/controllers/stgController.js  */
 import mongoose from "mongoose";
 import Patient  from "../models/Patient.js";
 import genShortTermGoal from "../utils/genShortTermGoal.js";
 import { getInterventions }  from "../utils/neoInterventions.js";
 
+/*─────────────────────────────────────────────────────────────*/
+/* small helper                                                */
+/*─────────────────────────────────────────────────────────────*/
+const toPlainId = (val) => {
+  if (!val) return null;                       // null / undefined
+  if (typeof val === "string") return val;
+  if (mongoose.Types.ObjectId.isValid(val)) return String(val);
+  if (typeof val === "object" && val._id) return String(val._id);
+  return null;
+};
+
+/*─────────────────────────────────────────────────────────────*/
+/* POST  /api/clients/:id/gen-stg                              */
+/*─────────────────────────────────────────────────────────────*/
 export const generateStg = async (req, res, next) => {
   try {
     const { id }            = req.params;        // patient id
-    const { appointmentId } = req.body;          // must be sent by the client
+    const { appointmentId } = req.body;
     if (!appointmentId)
       return res.status(400).json({ message: "appointmentId required" });
 
     const patient = await Patient.findById(id).lean();
-    if (!patient) return res.status(404).json({ message:"Patient not found" });
+    if (!patient)
+      return res.status(404).json({ message: "Patient not found" });
 
     const visit = patient.visitHistory?.find(
-      v => String(v.appointment) === String(appointmentId)
+      (v) => toPlainId(v.appointment) === String(appointmentId)
     );
     const noteText = visit?.note || "";
 
-    /* 1️⃣  pull 4-5 evidence-based interventions from Neo4j ------------ */
+    /* 1️⃣  Evidence-based interventions */
     const interventions = await getInterventions({
-      disorders: patient.pastHistory || [],   // treat diagnoses as “disorders”
-      keywords : [],                          // can refine later
-      limit    : 5
+      disorders: patient.pastHistory || [],
+      keywords : [],
+      limit    : 5,
     });
 
-    /* 2️⃣  ask Gemini for ONE sentence (20-25 words) ------------------- */
+    /* 2️⃣  LLM generates one ST-goal sentence */
     const text = await genShortTermGoal({ note: noteText, interventions });
 
-    /* build the stg object we’ll store */
     const stgObj = {
       appointment: new mongoose.Types.ObjectId(appointmentId),
-      text       :text
+      text,
     };
 
-    /* 2️⃣  REMOVE any older ST-G for this appointment */
+    /* Replace any existing ST-goal for that appointment */
     await Patient.updateOne(
       { _id: id },
       { $pull: { stgs: { appointment: stgObj.appointment } } }
     );
-
-    /* 3️⃣  PUSH the fresh ST-G */
     await Patient.updateOne(
       { _id: id },
       { $push: { stgs: stgObj } }
     );
 
-    /* 4️⃣  send just the new goal back */
     res.json(stgObj);
+  } catch (err) {
+    next(err);
+  }
+};
+
+/*─────────────────────────────────────────────────────────────*/
+/* PATCH  /api/clients/:id/stg                                 */
+/*─────────────────────────────────────────────────────────────*/
+/*─────────────────────────────────────────────────────────────*/
+/* PATCH  /api/clients/:id/stg                                 */
+/*─────────────────────────────────────────────────────────────*/
+export const updateStg = async (req, res, next) => {
+  try {
+    const { id } = req.params;                    // patient id
+    const { appointmentId, text } = req.body;
+
+    if (!appointmentId || text == null)
+      return res.status(400).json({ message: "appointmentId and text required" });
+
+    /* verify ownership */
+    const pat = await Patient.findOne({ _id: id, slp: req.user._id });
+    if (!pat) return res.status(404).json({ message: "Not found" });
+
+    /* build row */
+    const row = {
+      appointment: new mongoose.Types.ObjectId(appointmentId),
+      text,
+    };
+
+    /* 1️⃣  remove any existing entry for that appointment */
+    await Patient.updateOne(
+      { _id: id },
+      { $pull: { stgs: { appointment: row.appointment } } }
+    );
+
+    /* 2️⃣  push the new one */
+    await Patient.updateOne(
+      { _id: id },
+      { $push: { stgs: row } }
+    );
+
+    /* 3️⃣  return fresh stgs array */
+    const { stgs } = await Patient.findById(id, "stgs");
+    res.json(stgs);
   } catch (err) {
     next(err);
   }
