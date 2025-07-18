@@ -220,13 +220,14 @@ export const generateActivity = async (req, res, next) => {
       duration    = "",
       idea        = "",
       materials   = [],
-      activityName = ""
+      activityName = "",
+      preview     = false  // ADD THIS - check if it's just a preview
     } = req.body;
 
     /* ---------- load appointment ---------- */
     const appt = await Appointment.findById(apptId)
-      .populate("group",   "patients")
-      .populate("patient", "name");
+        .populate("group",   "patients")
+        .populate("patient", "name");
     if (!appt) return res.status(404).json({ message: "Appointment not found" });
 
     /* ---------- build Gemini prompt ---------- */
@@ -240,7 +241,7 @@ ${heading}<!-- KEEP this heading unchanged -->
 
 Using the information below, craft **one** complete activity.
 
-${idea ? `Therapist’s idea / focus: ${idea}` : ""}
+${idea ? `Therapist's idea / focus: ${idea}` : ""}
 
 • Duration: ${duration || "30 Minutes"}
 • Target goals: ${goals.length ? goals.join(", ") : "general communication"}
@@ -253,7 +254,7 @@ ${safeNotes}
 Return the plan in **Markdown**:
 
 ### Activity Name
-<should be “${activityName}”>
+<should be "${activityName}">
 
 ### Requirements
 - <each material>
@@ -265,9 +266,9 @@ Return the plan in **Markdown**:
     /* ---------- call Gemini ---------- */
     const gemBody = { contents: [{ parts: [{ text: promptText }] }] };
     const gRes = await fetch(
-      `${GEMINI_ENDPOINT}?key=${process.env.GEMINI_KEY}`,
-      { method: "POST", headers:{ "Content-Type":"application/json" },
-        body: JSON.stringify(gemBody) }
+        `${GEMINI_ENDPOINT}?key=${process.env.GEMINI_KEY}`,
+        { method: "POST", headers:{ "Content-Type":"application/json" },
+          body: JSON.stringify(gemBody) }
     );
 
     const gJson = await gRes.json();
@@ -275,21 +276,53 @@ Return the plan in **Markdown**:
 
     const plan = gJson.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
 
-    /* ---------- create Activity doc ---------- */
-    const activity = await Activity.create({
-      slp:   appt.slp,
-      name:  activityName || "Generated Activity",
-      description: plan,
-      materials,
-      members: memberIds,
-      goals
+    // IF IT'S JUST A PREVIEW, RETURN ONLY THE PLAN
+    if (preview) {
+      return res.json({ plan });
+    }
+
+    /* ---------- CREATE ACTIVITY ONLY IF NOT PREVIEW ---------- */
+
+    // CHECK FOR EXISTING ACTIVITY WITH SAME NAME TO PREVENT DUPLICATES
+    const existingActivity = await Activity.findOne({
+      slp: appt.slp,
+      name: activityName || "Generated Activity",
+      // Add more specific criteria to identify duplicates
+      members: { $all: memberIds, $size: memberIds.length }
     });
 
-    /* ---------- reference it ---------- */
+    let activity;
+    if (existingActivity) {
+      // UPDATE EXISTING INSTEAD OF CREATING NEW
+      activity = await Activity.findByIdAndUpdate(
+          existingActivity._id,
+          {
+            description: plan,
+            materials,
+            members: memberIds,
+            goals,
+            updatedAt: new Date()  // Track when it was last updated
+          },
+          { new: true }
+      );
+    } else {
+      // CREATE NEW ACTIVITY
+      activity = await Activity.create({
+        slp:   appt.slp,
+        name:  activityName || "Generated Activity",
+        description: plan,
+        materials,
+        members: memberIds,
+        goals
+      });
+    }
+
+    /* ---------- reference it (only if not already referenced) ---------- */
     await Appointment.updateOne(
-      { _id: apptId },
-      { $addToSet: { activities: activity._id } }
+        { _id: apptId },
+        { $addToSet: { activities: activity._id } }  // $addToSet prevents duplicates
     );
+
     await addActRefToPatients(appt, activity._id);   // helper from earlier
 
     /* ---------- respond ---------- */
@@ -298,7 +331,6 @@ Return the plan in **Markdown**:
     next(err);
   }
 };
-
 
 /* ------------------------------------------------------------------
    3.  PATCH /api/appointments/:aid/activities/:actId
