@@ -1,99 +1,99 @@
 /* ─── activityController.js (drop-in) ───────────────────────── */
 import dotenv from "dotenv";
 dotenv.config();
-import Group from "../models/Group.js"; 
+import Group from "../models/Group.js";
 
 import Appointment from "../models/Appointment.js";
 import Patient     from "../models/Patient.js";
 
 const GEMINI_ENDPOINT =
-  "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
+    "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
 
 const PLACEHOLDER_NOTE =
-  "• Therapist-note: session still awaiting AI notes.";
+    "• Therapist-note: session still awaiting AI notes.";
 
 /* ------------------------------------------------------------------
    helpers
 ------------------------------------------------------------------- */
 const buildVisitNotes = (appt, ids = []) => {
-  const recMap = new Map();
-  if (appt.recommendation?.individualInsights?.length) {
-    appt.recommendation.individualInsights.forEach((ii) => {
-      const pid   = String(ii.patient._id);
-      const lines = (ii.insights || []).map(
-        (x) => `• [${x.time}] ${x.text}`
-      );
-      recMap.set(pid, lines.length ? lines : [PLACEHOLDER_NOTE]);
+    const recMap = new Map();
+    if (appt.recommendation?.individualInsights?.length) {
+        appt.recommendation.individualInsights.forEach((ii) => {
+            const pid   = String(ii.patient._id);
+            const lines = (ii.insights || []).map(
+                (x) => `• [${x.time}] ${x.text}`
+            );
+            recMap.set(pid, lines.length ? lines : [PLACEHOLDER_NOTE]);
+        });
+    }
+
+    const chunks = ids.map((pid) => {
+        const notes = recMap.get(String(pid)) || [PLACEHOLDER_NOTE];
+        return notes.join("\n");
     });
-  }
 
-  const chunks = ids.map((pid) => {
-    const notes = recMap.get(String(pid)) || [PLACEHOLDER_NOTE];
-    return notes.join("\n");
-  });
-
-  return chunks.length
-    ? chunks.join("\n\n")
-    : `### No specific members selected\n${PLACEHOLDER_NOTE}`;
+    return chunks.length
+        ? chunks.join("\n\n")
+        : `### No specific members selected\n${PLACEHOLDER_NOTE}`;
 };
 
 const buildPatientStgs = async (appt, ids = []) => {
-  const pids = await getPatientIds(appt);
+    const pids = await getPatientIds(appt);
 
-  const map = new Map();              // pid → stgText | ""
-  const pats = await Patient.find({ _id: { $in: pids } }, "stgs");
+    const map = new Map();              // pid → stgText | ""
+    const pats = await Patient.find({ _id: { $in: pids } }, "stgs");
 
-  pats.forEach(p => {
-    const row = p.stgs?.find(
-      s => String(s.appointment) === String(appt._id)
-    );
-    map.set(String(p._id), row?.text || "");
-  });
+    pats.forEach(p => {
+        const row = p.stgs?.find(
+            s => String(s.appointment) === String(appt._id)
+        );
+        map.set(String(p._id), row?.text || "");
+    });
 
-  const chunks = ids.map(id => map.get(String(id)) || "");
-  return chunks.join("\n\n").trim() ||
-         "Therapist has not entered visit notes yet.";
+    const chunks = ids.map(id => map.get(String(id)) || "");
+    return chunks.join("\n\n").trim() ||
+        "Therapist has not entered visit notes yet.";
 };
 
 const getPatientIds = async (appt) => {
-  if (appt.type === "group") {
-    if (appt.group?.patients) return appt.group.patients;
-    const g = await Group.findById(appt.group, "patients");
-    return g ? g.patients : [];
-  }
-  return [appt.patient];
+    if (appt.type === "group") {
+        if (appt.group?.patients) return appt.group.patients;
+        const g = await Group.findById(appt.group, "patients");
+        return g ? g.patients : [];
+    }
+    return [appt.patient];
 };
 
 /* add / replace one activity-id in every patient’s visit row */
 const addActRefToPatients = async (appt, actId) => {
-  const pids = await getPatientIds(appt);
+    const pids = await getPatientIds(appt);
 
-  for (const pid of pids) {
-    const base = {
-      _id: pid,
-      "visitHistory.appointment": appt._id,      // enables the $ positional
-    };
+    for (const pid of pids) {
+        const base = {
+            _id: pid,
+            "visitHistory.appointment": appt._id,      // enables the $ positional
+        };
 
-    /* 1️⃣  yank any previous copy (if it exists) */
-    await Patient.updateOne(base, {
-      $pull: { "visitHistory.$.activities": actId },
-    });
+        /* 1️⃣  yank any previous copy (if it exists) */
+        await Patient.updateOne(base, {
+            $pull: { "visitHistory.$.activities": actId },
+        });
 
-    /* 2️⃣  push the fresh copy back in (dedup naturally) */
-    await Patient.updateOne(
-      base,
-      { $addToSet: { "visitHistory.$.activities": actId } }
-    );
-  }
+        /* 2️⃣  push the fresh copy back in (dedup naturally) */
+        await Patient.updateOne(
+            base,
+            { $addToSet: { "visitHistory.$.activities": actId } }
+        );
+    }
 };
 
 /* remove ref everywhere */
 const removeActRefFromPatients = async (appt, actId) => {
-  const pids = await getPatientIds(appt);
-  await Patient.updateMany(
-    { _id: { $in: pids } },
-    { $pull: { "visitHistory.$[].activities": actId } }
-  );
+    const pids = await getPatientIds(appt);
+    await Patient.updateMany(
+        { _id: { $in: pids } },
+        { $pull: { "visitHistory.$[].activities": actId } }
+    );
 };
 
 /**
@@ -105,32 +105,32 @@ const removeActRefFromPatients = async (appt, actId) => {
    patient’s visitHistory row that matches the appointment
 ------------------------------------------------------------------- */
 const syncAddToPatients = async (appt, activity) => {
-  const actCopy = {
-    ...activity,
-    members: Array.isArray(activity?.members)
-      ? activity.members.map(String)
-      : [],
-    _id: activity._id, // make sure _id is kept
-  };
-
-  const patientIds = await getPatientIds(appt);
-
-  for (const pid of patientIds) {
-    const baseQuery = {
-      _id: pid,
-      "visitHistory.appointment": appt._id, // → ensures the positional $
+    const actCopy = {
+        ...activity,
+        members: Array.isArray(activity?.members)
+            ? activity.members.map(String)
+            : [],
+        _id: activity._id, // make sure _id is kept
     };
 
-    /* 1. yank any older copy (if it exists) ------------------- */
-    await Patient.updateOne(baseQuery, {
-      $pull: { "visitHistory.$.activities": { _id: activity._id } },
-    });
+    const patientIds = await getPatientIds(appt);
 
-    /* 2. push the fresh copy back in (dedup by _id) ----------- */
-    await Patient.updateOne(baseQuery, {
-      $addToSet: { "visitHistory.$.activities": actCopy },
-    });
-  }
+    for (const pid of patientIds) {
+        const baseQuery = {
+            _id: pid,
+            "visitHistory.appointment": appt._id, // → ensures the positional $
+        };
+
+        /* 1. yank any older copy (if it exists) ------------------- */
+        await Patient.updateOne(baseQuery, {
+            $pull: { "visitHistory.$.activities": { _id: activity._id } },
+        });
+
+        /* 2. push the fresh copy back in (dedup by _id) ----------- */
+        await Patient.updateOne(baseQuery, {
+            $addToSet: { "visitHistory.$.activities": actCopy },
+        });
+    }
 };
 
 
@@ -138,16 +138,16 @@ const syncAddToPatients = async (appt, activity) => {
  * Remove an activity everywhere (patients + appointment already handled).
  */
 const syncRemoveFromPatients = async (appt, activityId) => {
-  const patientIds = await getPatientIds(appt);
+    const patientIds = await getPatientIds(appt);
 
-  await Promise.all(
-    patientIds.map((pid) =>
-      Patient.updateOne(
-        { _id: pid },
-        { $pull: { "visitHistory.$[].activities": { _id: activityId } } }
-      )
-    )
-  );
+    await Promise.all(
+        patientIds.map((pid) =>
+            Patient.updateOne(
+                { _id: pid },
+                { $pull: { "visitHistory.$[].activities": { _id: activityId } } }
+            )
+        )
+    );
 };
 
 
@@ -158,24 +158,24 @@ const syncRemoveFromPatients = async (appt, activityId) => {
    1.  POST /api/appointments/:id/activity-draft
 ------------------------------------------------------------------- */
 export const generateActivityDraft = async (req, res, next) => {
-  try {
-    const { id } = req.params;
-    const { memberIds = [], goals = [], duration = "", idea = "" } = req.body;
+    try {
+        const { id } = req.params;
+        const { memberIds = [], goals = [], duration = "", idea = "" } = req.body;
 
-    const appt = await Appointment.findById(id)
-      .populate("group", "patients name")
-      .populate("patient", "name")
-      .populate({
-        path: "recommendation",
-        populate: { path: "individualInsights.patient", select: "name" },
-      });
+        const appt = await Appointment.findById(id)
+            .populate("group", "patients name")
+            .populate("patient", "name")
+            .populate({
+                path: "recommendation",
+                populate: { path: "individualInsights.patient", select: "name" },
+            });
 
-    if (!appt)
-      return res.status(404).json({ message: "Appointment not found" });
+        if (!appt)
+            return res.status(404).json({ message: "Appointment not found" });
 
-    const safeNotes = await buildPatientStgs(appt, memberIds);
+        const safeNotes = await buildPatientStgs(appt, memberIds);
 
-    const prompt = `
+        const prompt = `
 You are a speech-language therapy assistant.
 Design ONE age-appropriate activity (game / exercise).
 
@@ -197,27 +197,27 @@ Return ONLY valid JSON with exactly these keys:
 }
 `.trim();
 
-    const gemBody = { contents: [{ parts: [{ text: prompt }] }] };
-    const gRes = await fetch(
-      `${GEMINI_ENDPOINT}?key=${process.env.GEMINI_KEY}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(gemBody),
-      }
-    );
+        const gemBody = { contents: [{ parts: [{ text: prompt }] }] };
+        const gRes = await fetch(
+            `${GEMINI_ENDPOINT}?key=${process.env.GEMINI_KEY}`,
+            {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(gemBody),
+            }
+        );
 
-    const j = await gRes.json();
-    if (!gRes.ok) return res.status(gRes.status).json(j);
+        const j = await gRes.json();
+        if (!gRes.ok) return res.status(gRes.status).json(j);
 
-    const raw = (j.candidates?.[0]?.content?.parts?.[0]?.text || "")
-      .trim()
-      .replace(/```json|```/g, "");
-    const draft = JSON.parse(raw); // { name, description, materials }
-    res.json(draft);
-  } catch (err) {
-    next(err);
-  }
+        const raw = (j.candidates?.[0]?.content?.parts?.[0]?.text || "")
+            .trim()
+            .replace(/```json|```/g, "");
+        const draft = JSON.parse(raw); // { name, description, materials }
+        res.json(draft);
+    } catch (err) {
+        next(err);
+    }
 };
 
 /* ------------------------------------------------------------------
@@ -230,30 +230,30 @@ import Activity from "../models/Activity.js";   // ← add at the top of file
 
 // controllers/appointmentController.js (or wherever it lives)
 export const generateActivity = async (req, res, next) => {
-  try {
-    /* ---------- request fields ---------- */
-    const { id: apptId } = req.params;
-    const {
-      memberIds   = [],
-      goals       = [],
-      duration    = "",
-      idea        = "",
-      materials   = [],
-      activityName = "",
-      preview     = false  // ADD THIS - check if it's just a preview
-    } = req.body;
+    try {
+        /* ---------- request fields ---------- */
+        const { id: apptId } = req.params;
+        const {
+            memberIds   = [],
+            goals       = [],
+            duration    = "",
+            idea        = "",
+            materials   = [],
+            activityName = "",
+            preview     = false  // ADD THIS - check if it's just a preview
+        } = req.body;
 
-    /* ---------- load appointment ---------- */
-    const appt = await Appointment.findById(apptId)
-        .populate("group",   "patients")
-        .populate("patient", "name");
-    if (!appt) return res.status(404).json({ message: "Appointment not found" });
+        /* ---------- load appointment ---------- */
+        const appt = await Appointment.findById(apptId)
+            .populate("group",   "patients")
+            .populate("patient", "name");
+        if (!appt) return res.status(404).json({ message: "Appointment not found" });
 
-    /* ---------- craft Gemini prompt ---------- */
-    const safeNotes = await buildPatientStgs(appt, memberIds);
-    const heading   = activityName ? `### ${activityName}\n` : "";
+        /* ---------- craft Gemini prompt ---------- */
+        const safeNotes = await buildPatientStgs(appt, memberIds);
+        const heading   = activityName ? `### ${activityName}\n` : "";
 
-    const promptText = `
+        const promptText = `
 You are a speech-language therapy assistant.
 
 ${heading}<!-- KEEP this heading unchanged -->
@@ -281,96 +281,96 @@ Return the plan in **Markdown**:
 ### Instructions
 1. …`.trim();
 
-    /* ---------- call Gemini ---------- */
-    const gemBody = { contents: [{ parts: [{ text: promptText }] }] };
-    const gRes = await fetch(
-      `${GEMINI_ENDPOINT}?key=${process.env.GEMINI_KEY}`,
-      {
-        method  : "POST",
-        headers : { "Content-Type":"application/json" },
-        body    : JSON.stringify(gemBody)
-      }
-    );
+        /* ---------- call Gemini ---------- */
+        const gemBody = { contents: [{ parts: [{ text: promptText }] }] };
+        const gRes = await fetch(
+            `${GEMINI_ENDPOINT}?key=${process.env.GEMINI_KEY}`,
+            {
+                method  : "POST",
+                headers : { "Content-Type":"application/json" },
+                body    : JSON.stringify(gemBody)
+            }
+        );
 
-    const gJson = await gRes.json();
-    if (!gRes.ok) return res.status(gRes.status).json(gJson);
+        const gJson = await gRes.json();
+        if (!gRes.ok) return res.status(gRes.status).json(gJson);
 
-    const plan = gJson.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
+        const plan = gJson.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
 
-    // IF IT'S JUST A PREVIEW, RETURN ONLY THE PLAN
-    if (preview) {
-      return res.json({ plan });
+        // IF IT'S JUST A PREVIEW, RETURN ONLY THE PLAN
+        if (preview) {
+            return res.json({ plan });
+        }
+
+        /* ---------- CREATE ACTIVITY ONLY IF NOT PREVIEW ---------- */
+
+        // CHECK FOR EXISTING ACTIVITY WITH SAME NAME TO PREVENT DUPLICATES
+        const existingActivity = await Activity.findOne({
+            slp: appt.slp,
+            name: activityName || "Generated Activity",
+            // Add more specific criteria to identify duplicates
+            members: { $all: memberIds, $size: memberIds.length }
+        });
+
+        let activity;
+        if (existingActivity) {
+            // UPDATE EXISTING INSTEAD OF CREATING NEW
+            activity = await Activity.findByIdAndUpdate(
+                existingActivity._id,
+                {
+                    description: plan,
+                    materials,
+                    members: memberIds,
+                    goals,
+                    updatedAt: new Date()  // Track when it was last updated
+                },
+                { new: true }
+            );
+        } else {
+            // CREATE NEW ACTIVITY
+            activity = await Activity.create({
+                slp:   appt.slp,
+                name:  activityName || "Generated Activity",
+                description: plan,
+                materials,
+                members: memberIds,
+                goals
+            });
+        }
+
+        /* ---------- reference it (only if not already referenced) ---------- */
+        await Appointment.updateOne(
+            { _id: apptId },
+            { $addToSet: { activities: activity._id } }  // $addToSet prevents duplicates
+        );
+
+        await addActRefToPatients(appt, activity._id);   // helper from earlier
+
+        return res.json({ plan, activity });
+    } catch (err) {
+        next(err);
     }
-
-    /* ---------- CREATE ACTIVITY ONLY IF NOT PREVIEW ---------- */
-
-    // CHECK FOR EXISTING ACTIVITY WITH SAME NAME TO PREVENT DUPLICATES
-    const existingActivity = await Activity.findOne({
-      slp: appt.slp,
-      name: activityName || "Generated Activity",
-      // Add more specific criteria to identify duplicates
-      members: { $all: memberIds, $size: memberIds.length }
-    });
-
-    let activity;
-    if (existingActivity) {
-      // UPDATE EXISTING INSTEAD OF CREATING NEW
-      activity = await Activity.findByIdAndUpdate(
-          existingActivity._id,
-          {
-            description: plan,
-            materials,
-            members: memberIds,
-            goals,
-            updatedAt: new Date()  // Track when it was last updated
-          },
-          { new: true }
-      );
-    } else {
-      // CREATE NEW ACTIVITY
-      activity = await Activity.create({
-        slp:   appt.slp,
-        name:  activityName || "Generated Activity",
-        description: plan,
-        materials,
-        members: memberIds,
-        goals
-      });
-    }
-
-    /* ---------- reference it (only if not already referenced) ---------- */
-    await Appointment.updateOne(
-        { _id: apptId },
-        { $addToSet: { activities: activity._id } }  // $addToSet prevents duplicates
-    );
-
-    await addActRefToPatients(appt, activity._id);   // helper from earlier
-
-    return res.json({ plan, activity });
-  } catch (err) {
-    next(err);
-  }
 };
 
 /* ------------------------------------------------------------------
    3.  PATCH /api/appointments/:aid/activities/:actId
 ------------------------------------------------------------------- */
 export const updateActivity = async (req, res, next) => {
-  try {
-    const { aid, actId }     = req.params;
-    const { name, description, materials, members, goals } = req.body;
+    try {
+        const { aid, actId }     = req.params;
+        const { name, description, materials, members, goals } = req.body;
 
-    /* 1) update the Activity doc */
-    const activity = await Activity.findByIdAndUpdate(
-      actId,
-      { name, description, materials, members, goals },
-      { new:true }
-    );
-    if (!activity) return res.status(404).json({ message:"Activity not found" });
+        /* 1) update the Activity doc */
+        const activity = await Activity.findByIdAndUpdate(
+            actId,
+            { name, description, materials, members, goals },
+            { new:true }
+        );
+        if (!activity) return res.status(404).json({ message:"Activity not found" });
 
-    /* 2) nothing else to do – patients store only the id */
-    res.json(activity);
-  } catch (e) { next(e); }
+        /* 2) nothing else to do – patients store only the id */
+        res.json(activity);
+    } catch (e) { next(e); }
 };
 
 
@@ -378,20 +378,20 @@ export const updateActivity = async (req, res, next) => {
    4.  DELETE /api/appointments/:aid/activities/:actId
 ------------------------------------------------------------------- */
 export const deleteActivity = async (req, res, next) => {
-  try {
-    const { aid, actId } = req.params;
+    try {
+        const { aid, actId } = req.params;
 
-    const appt = await Appointment.findByIdAndUpdate(
-      aid,
-      { $pull: { activities: actId } },
-      { new:true }
-    );
-    if (!appt) return res.status(404).json({ message:"Appointment not found" });
+        const appt = await Appointment.findByIdAndUpdate(
+            aid,
+            { $pull: { activities: actId } },
+            { new:true }
+        );
+        if (!appt) return res.status(404).json({ message:"Appointment not found" });
 
-    await Activity.findByIdAndDelete(actId);
-    await removeActRefFromPatients(appt, actId);
+        await Activity.findByIdAndDelete(actId);
+        await removeActRefFromPatients(appt, actId);
 
-    res.json({ ok:true });
-  } catch (e) { next(e); }
+        res.json({ ok:true });
+    } catch (e) { next(e); }
 };
 
