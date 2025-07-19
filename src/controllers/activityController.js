@@ -234,22 +234,20 @@ export const generateActivity = async (req, res, next) => {
     /* ---------- request fields ---------- */
     const { id: apptId } = req.params;
     const {
-      memberIds    = [],
-      goals        = [],
-      duration     = "",
-      idea         = "",
-      materials    = [],
+      memberIds   = [],
+      goals       = [],
+      duration    = "",
+      idea        = "",
+      materials   = [],
       activityName = "",
-      preview      = false          // 👈  NEW
+      preview     = false  // ADD THIS - check if it's just a preview
     } = req.body;
 
     /* ---------- load appointment ---------- */
     const appt = await Appointment.findById(apptId)
-      .populate("group",   "patients")
-      .populate("patient", "name");
-    if (!appt) {
-      return res.status(404).json({ message: "Appointment not found" });
-    }
+        .populate("group",   "patients")
+        .populate("patient", "name");
+    if (!appt) return res.status(404).json({ message: "Appointment not found" });
 
     /* ---------- craft Gemini prompt ---------- */
     const safeNotes = await buildPatientStgs(appt, memberIds);
@@ -262,7 +260,7 @@ ${heading}<!-- KEEP this heading unchanged -->
 
 Using the information below, craft **one** complete activity.
 
-${idea ? `Therapist’s idea / focus: ${idea}` : ""}
+${idea ? `Therapist's idea / focus: ${idea}` : ""}
 
 • Duration: ${duration || "30 Minutes"}
 • Target goals: ${goals.length ? goals.join(", ") : "general communication"}
@@ -275,7 +273,7 @@ ${safeNotes}
 Return the plan in **Markdown**:
 
 ### Activity Name
-<should be “${activityName || "Generated Activity"}”>
+<should be "${activityName}">
 
 ### Requirements
 - <each material>
@@ -299,24 +297,51 @@ Return the plan in **Markdown**:
 
     const plan = gJson.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
 
-    /* ---------- PREVIEW-ONLY branch ---------- */
+    // IF IT'S JUST A PREVIEW, RETURN ONLY THE PLAN
     if (preview) {
-      return res.json({ plan });   // nothing persisted
+      return res.json({ plan });
     }
 
-    /* ---------- PERSIST branch (old behaviour) ---------- */
-    const activity = await Activity.create({
-      slp        : appt.slp,
-      name       : activityName || "Generated Activity",
-      description: plan,
-      materials,
-      members    : memberIds,
-      goals
+    /* ---------- CREATE ACTIVITY ONLY IF NOT PREVIEW ---------- */
+
+    // CHECK FOR EXISTING ACTIVITY WITH SAME NAME TO PREVENT DUPLICATES
+    const existingActivity = await Activity.findOne({
+      slp: appt.slp,
+      name: activityName || "Generated Activity",
+      // Add more specific criteria to identify duplicates
+      members: { $all: memberIds, $size: memberIds.length }
     });
 
+    let activity;
+    if (existingActivity) {
+      // UPDATE EXISTING INSTEAD OF CREATING NEW
+      activity = await Activity.findByIdAndUpdate(
+          existingActivity._id,
+          {
+            description: plan,
+            materials,
+            members: memberIds,
+            goals,
+            updatedAt: new Date()  // Track when it was last updated
+          },
+          { new: true }
+      );
+    } else {
+      // CREATE NEW ACTIVITY
+      activity = await Activity.create({
+        slp:   appt.slp,
+        name:  activityName || "Generated Activity",
+        description: plan,
+        materials,
+        members: memberIds,
+        goals
+      });
+    }
+
+    /* ---------- reference it (only if not already referenced) ---------- */
     await Appointment.updateOne(
-      { _id: apptId },
-      { $addToSet: { activities: activity._id } }
+        { _id: apptId },
+        { $addToSet: { activities: activity._id } }  // $addToSet prevents duplicates
     );
 
     await addActRefToPatients(appt, activity._id);   // helper from earlier
