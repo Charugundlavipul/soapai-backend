@@ -41,12 +41,15 @@ export const generateStg = async (req, res, next) => {
       limit    : 5,
     });
 
+    console.log("Interventions found:", interventions);
+
     /* 2️⃣  LLM generates one ST-goal sentence */
     const text = await genShortTermGoal({ note: noteText, interventions });
 
     const stgObj = {
       appointment: new mongoose.Types.ObjectId(appointmentId),
       text,
+      interventions,
     };
 
     /* Replace any existing ST-goal for that appointment */
@@ -100,6 +103,12 @@ export const updateStg = async (req, res, next) => {
       { _id: id },
       { $push: { stgs: row } }
     );
+
+    await Patient.updateOne(
+    { _id: id, "stgs.appointment": appointmentId },
+    { $set: { "stgs.$.text": text } },           // only text changes
+    { upsert: true }                             // safety net: create if missing
+  );
 
     /* 3️⃣  return fresh stgs array */
     const { stgs } = await Patient.findById(id, "stgs");

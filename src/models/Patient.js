@@ -2,6 +2,18 @@
 import mongoose from 'mongoose';
 const { Schema, model } = mongoose;
 
+
+const InterventionSchema = new Schema(
+  {
+    name          : { type: String, required: true },
+    description   : { type: String, default: "" },
+    procedure     : { type: String, default: "" },
+    targetDisorder: { type: String, default: "" },
+    source        : { type: String, default: "" },
+  },
+  { _id: false }
+);
+
 // One “visit” entry in visitHistory
 const VisitSchema = new Schema({
   date:        { type: Date, required: true },
@@ -60,6 +72,7 @@ const PatientSchema = new Schema({
           required : true,
         },
         text: { type: String, required: true },
+        interventions: { type: [InterventionSchema], default: [] },
       },
     ],
     default: [],

@@ -48,7 +48,6 @@ export async function getInterventions({
       keywords?.length ? CYPHER_WITH_KW : CYPHER_NO_KW,
       params
     );
-
     return res.records.map((rec) => {
       const i = rec.get("intervention").properties;
       const d = rec.get("disorder").properties;

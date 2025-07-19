@@ -14,18 +14,41 @@ const ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/gemini
 */
 router.post("/", requireAuth, upload.any(), async (req, res, next) => {
   try {
-    /* ── get chat history from whichever content-type ── */
     let history = req.body.messages || [];
     if (typeof history === "string") {
       try { history = JSON.parse(history); }
       catch { history = []; }
     }
-    const last = [...history].reverse().find(m => m.role === "user")?.content;
-    if (!last) return res.status(400).json({ error: "No user message." });
 
-    /* ── build Gemini request ── */
+    if (!Array.isArray(history) || !history.length) {
+      return res.status(400).json({ error: "Invalid or empty chat history." });
+    }
+
+    // Build Gemini conversation format
+    const gemContent = [];
+
+    // Optional: Insert system instruction
+    gemContent.push({
+      role: "user",
+      parts: [
+        {
+          text: "You are a helpful AI assistant analyzing therapy session videos. Give short, thoughtful answers (1-3 sentences). Avoid repeating context and don’t ramble."
+        }
+      ]
+    });
+
+    // Add conversation history (user & assistant)
+    for (const msg of history) {
+      if (msg.role === "user" || msg.role === "assistant") {
+        gemContent.push({
+          role: msg.role,
+          parts: [{ text: msg.content }]
+        });
+      }
+    }
+
     const gemBody = {
-      contents: [{ parts: [{ text: last }] }]
+      contents: gemContent
     };
 
     const gRes = await fetch(
@@ -34,7 +57,8 @@ router.post("/", requireAuth, upload.any(), async (req, res, next) => {
         method : "POST",
         headers: { "Content-Type": "application/json" },
         body   : JSON.stringify(gemBody)
-      });
+      }
+    );
 
     if (!gRes.ok) {
       return res.status(gRes.status).json(await gRes.json());
@@ -43,7 +67,10 @@ router.post("/", requireAuth, upload.any(), async (req, res, next) => {
     const gData = await gRes.json();
     const reply = gData.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
     res.json({ reply });
-  } catch (err) { next(err); }
+  } catch (err) {
+    next(err);
+  }
 });
+
 
 export default router;
