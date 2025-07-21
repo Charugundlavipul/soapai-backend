@@ -272,7 +272,7 @@ ${safeNotes}
 
 Return the plan in **Markdown**:
 
-### Activity Name
+# Activity Name
 <should be "${activityName}">
 
 ### Requirements
