@@ -1,0 +1,50 @@
+[
+  {
+    "name": "Expressive Language Goals",
+    "description": "Focus on helping students clearly express thoughts, ideas, and feelings using accurate vocabulary and sentence structure.",
+    "goals": [
+      { "name": "Sentence Structure",          "description": "Use age-appropriate 4–6 word sentences (subject + verb + object) accurately during structured tasks in 80% of opportunities." },
+      { "name": "Vocabulary Labeling",         "description": "Correctly label pictures or objects with appropriate vocabulary with 80% accuracy across three consecutive sessions." },
+      { "name": "WH-Questions",                "description": "Accurately ask and answer WH-questions (who, what, where, when, why) during structured activities with 75% accuracy." },
+      { "name": "Verb Tenses",                 "description": "Use correct verb tenses (present, past) spontaneously in speech with 80% accuracy." },
+      { "name": "Story Retelling",             "description": "Retell short stories or events using a minimum of three sequential events with minimal adult support." }
+    ]
+  },
+  {
+    "name": "Receptive Language Goals",
+    "description": "Enhance students’ ability to understand spoken language, follow instructions, and grasp main ideas.",
+    "goals": [
+      { "name": "Following Directions",              "description": "Successfully follow 2- to 3-step directions containing spatial or temporal concepts with 80% accuracy." },
+      { "name": "Main Idea Identification",          "description": "Identify the main idea and key details from spoken paragraphs with 75% accuracy." },
+      { "name": "Object and Descriptor Identification","description": "Point to or select named objects, actions, or descriptors during structured activities with 80% accuracy." },
+      { "name": "Vocabulary Understanding",          "description": "Demonstrate comprehension of classroom vocabulary through matching or sorting tasks with 80% accuracy." }
+    ]
+  },
+  {
+    "name": "Articulation Goals",
+    "description": "Improve speech clarity and sound production to enhance effective communication.",
+    "goals": [
+      { "name": "Phoneme Production",          "description": "Accurately produce targeted phonemes (/s/, /r/, /th/) in initial, medial, and final positions of words with 80% accuracy." },
+      { "name": "Reduction of Phonological Processes","description": "Reduce occurrences of phonological processes (fronting, gliding) in connected speech to less than 20%." },
+      { "name": "Self-monitoring",             "description": "Independently identify and correct speech sound errors during speech production in 3 out of 5 opportunities." }
+    ]
+  },
+  {
+    "name": "Pragmatic/Social Communication Goals",
+    "description": "Develop skills necessary for successful social interactions, including conversational skills and interpreting social cues.",
+    "goals": [
+      { "name": "Conversational Skills",       "description": "Initiate and sustain conversations across at least three conversational turns with peers and adults in 80% of opportunities." },
+      { "name": "Social Greetings and Requests","description": "Appropriately use greetings, farewells, and polite requests in structured role-play scenarios with 90% accuracy." },
+      { "name": "Emotion and Perspective Recognition","description": "Identify emotions and perspectives from visual stimuli or stories and discuss suitable responses with 80% accuracy." },
+      { "name": "Nonverbal Cue Response",      "description": "Appropriately interpret and respond to nonverbal cues, including facial expressions and body language, in 80% of opportunities." }
+    ]
+  },
+  {
+    "name": "Fluency and Voice Goals",
+    "description": "Target fluent speech patterns and appropriate vocal modulation for clearer communication.",
+    "goals": [
+      { "name": "Fluency",        "description": "Consistently utilize fluency techniques such as easy onset and pausing during connected speech with 80% accuracy." },
+      { "name": "Vocal Quality",  "description": "Maintain suitable vocal loudness and pitch in everyday conversational settings 80% of the time." }
+    ]
+  }
+]

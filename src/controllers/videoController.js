@@ -101,13 +101,55 @@ export const updateGoals = async (req, res, next) => {
     if (!Array.isArray(goals))
       return res.status(400).json({ message: 'goals must be an array' });
 
-    const vid = await Video.findOneAndUpdate(
+        const vid = await Video.findOneAndUpdate(
       { _id: id, slp: req.user._id },
       { goals },
       { new: true }
     );
+    if (!vid) return res.status(404).json({ message: "Not found" });
 
-    if (!vid) return res.status(404).json({ message: 'Not found' });
+    /* 2️⃣  Find all participants of that appointment */
+    const appt = await Appointment.findById(vid.appointment)
+      .populate("patient", "_id goals")
+      .populate("group",   "patients");
+
+    const participants =
+      appt.type === "group"
+        ? (await Group.findById(appt.group)).patients          // full docs
+        : [appt.patient];
+
+    /* 3️⃣  For each participant, upsert history rows @ 0 % */
+    await Promise.all(
+      participants.map(async (p) => {
+        const pat = await Patient.findById(p._id || p);
+        if (!pat) return;
+
+        goals.forEach((gName) => {
+          /* ignore if goal not in this patient’s master list */
+          if (!pat.goals.includes(gName)) return;
+
+          let gp = pat.goalProgress.find((r) => r.name === gName);
+          if (!gp) {
+            gp = { name: gName, progress: 0, history: [] };
+            pat.goalProgress.push(gp);
+          }
+
+          const row = gp.history.find(
+            (h) => String(h.appointment) === String(appt._id)
+          );
+          if (!row) {
+            gp.history.push({
+              appointment: appt._id,
+              date       : new Date(),
+              progress   : gp.progress ?? 0,
+            });
+          }
+        });
+
+        await pat.save();
+      })
+    );
+
     res.json(vid);
   } catch (e) { next(e); }
 };

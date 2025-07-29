@@ -41,17 +41,39 @@ const MaterialSchema = new Schema({
   filename:    { type: String, required: true },
 }, { _id: false });
 
-const GoalProgressSchema = new Schema({
-  name:        { type:String, required:true },   // goal text
- associated:  [{                                 // “history” entries
-   activityName: String,                         // e.g. “Emotion Charades”
-   onDate:      { type:Date, default:Date.now }  // when it happened
- }],
-  progress:    { type:Number, default:0 },        // %
-  comment:     { type:String, default:"" },
- startDate:   { type:Date, default:Date.now },   // when doctor set the goal
- targetDate:  { type: Date,   default: null },                                // optional due-date
-}, {_id:false});
+const GoalVisitSchema = new Schema(
+  {
+    appointment : { type:Schema.Types.ObjectId, ref:"Appointment", required:true },
+    date        : { type:Date, required:true },
+    progress    : { type:Number, default:0 }
+  },
+  { _id:false }
+);
+
+const GoalProgressSchema = new Schema(
+  {
+    name       : { type:String, required:true },
+    progress   : { type:Number, default:0 },      
+    comment    : { type:String, default:"" },
+    startDate  : { type:Date,   default:Date.now },
+    targetDate : { type:Date,   default:null },
+    associated : {
+      type:[{
+        activityName : String,
+        onDate       : { type:Date, default:Date.now }
+      }],
+      default:[]
+    },
+    history    : { type:[GoalVisitSchema], default:[] }
+  },
+  { _id:false }
+);
+
+/* quick virtual so the UI can read “latest” progress instantly */
+GoalProgressSchema.virtual("latest").get(function () {
+  if (!this.history.length) return 0;
+  return Math.max(...this.history.map(h => h.progress ?? 0));
+});
 
 
 /* ─── Main Patient schema ─── */
@@ -93,7 +115,6 @@ const PatientSchema = new Schema({
           enum: ["not-started", "present", "absent"],
           default: "not-started",
         },
-        progress: { type: Number, default: 0 }, // e.g. 50% done
       },
     ],
     default: [],

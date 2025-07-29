@@ -5,7 +5,10 @@ import {
   login,
   forgot,
   verifyOtp,
-  resetPassword
+  resetPassword,
+  registerInit,
+  registerVerify
+
 } from '../controllers/authController.js';
 import { runValidation } from '../middlewares/validate.js';
 
@@ -58,5 +61,20 @@ router.post('/logout', (_req, res) => {
   // stateless JWT → nothing to invalidate; client just deletes token
   res.json({ ok: true });
 });
+
+// Registration with OTP verification
+router.post('/register-init', [
+  body('name').notEmpty().withMessage('Full name is required'),
+  emailV,
+  passV,
+  runValidation
+], registerInit);
+
+router.post('/register-verify', [
+  emailV,
+  body('otp').isLength({ min: 6 }).withMessage('Invalid code'),
+  runValidation
+], registerVerify);
+
 
 export default router;

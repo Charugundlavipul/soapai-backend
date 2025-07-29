@@ -14,7 +14,9 @@ import {
   updateGoalProgress,
   addGoalHistory,
   listMaterials,
-  updateAttendanceStatus
+  updateAttendanceStatus,
+  upsertGoalProgressForVisit,
+  addActivitiesToVisit
   
 } from '../controllers/patientController.js';
 import multer from 'multer';
@@ -86,5 +88,16 @@ router.patch(
   [nameV, runValidation],
   update
 );
+router.patch(
+  "/:id/goal-progress/:apptId",
+  requireAuth,
+  upsertGoalProgressForVisit
+);
+router.patch(
+  "/clients/:id/visit/:apptId/activities",
+  requireAuth,
+  addActivitiesToVisit
+);
+
 
 export default router;

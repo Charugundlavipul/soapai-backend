@@ -3,8 +3,49 @@ import jwt from 'jsonwebtoken';
 import Slp from '../models/Slp.js';
 import cryptoRS from 'crypto-random-string';
 import { sendOtp } from '../utils/mailer.js';
+import { seedAnnualGoalsForSlp } from '../utils/seedAnnualGoals.js';
 
 const SALT_ROUNDS = 12;
+
+// server/controllers/auth.js
+let tempUsers = {}; // in-memory temp store (for demo; use DB or Redis in prod)
+
+export const registerInit = async (req, res, next) => {
+  try {
+    const { name, email, password } = req.body;
+    if (await Slp.findOne({ email }))
+      return res.status(409).json({ message: 'Email already registered' });
+
+    const otp = cryptoRS({ length: 6, type: 'numeric' });
+    const otpHash = await bcrypt.hash(otp, SALT_ROUNDS);
+    tempUsers[email] = { name, password, otpHash, expires: Date.now() + 10 * 60 * 1000 };
+
+    await sendOtp(email, otp);
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+};
+
+export const registerVerify = async (req, res, next) => {
+  try {
+    const { email, otp } = req.body;
+    const user = tempUsers[email];
+    if (!user || Date.now() > user.expires)
+      return res.status(400).json({ message: 'Code expired or invalid' });
+
+    const ok = await bcrypt.compare(otp, user.otpHash);
+    if (!ok) return res.status(400).json({ message: 'Invalid code' });
+
+    const passwordHash = await bcrypt.hash(user.password, SALT_ROUNDS);
+    const slp = await Slp.create({ name: user.name, email, passwordHash });
+    await seedAnnualGoalsForSlp(slp._id);
+    const token = jwt.sign({ id: slp._id, role: 'slp' },
+                           process.env.JWT_SECRET,
+                           { expiresIn: process.env.JWT_EXPIRES });
+
+    delete tempUsers[email]; // clean up
+    res.json({ token, slp: { id: slp._id, name: slp.name, email: slp.email } });
+  } catch (e) { next(e); }
+};
 
 export const register = async (req, res, next) => {
   try {
@@ -47,22 +88,27 @@ export const login = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+// controllers/authController.js
 export const forgot = async (req, res, next) => {
   try {
     const { email } = req.body;
     const slp = await Slp.findOne({ email });
-    if (!slp) return res.status(200).json({ ok: true }); // don’t leak accounts
 
-    // gen 6-digit numeric code
-    const otpPlain = cryptoRS({ length: 6, type: 'numeric' });
-    slp.resetOtpHash    = await bcrypt.hash(otpPlain, SALT_ROUNDS);
-    slp.resetOtpExpires = Date.now() + 10 * 60 * 1000; // 10 min
+    /* ⬇️  NEW: explicit 404 when user doesn't exist */
+    if (!slp)
+      return res.status(404).json({ message: 'No account found for that e-mail' });
+
+    // generate 6-digit code
+    const otpPlain        = cryptoRS({ length: 6, type: 'numeric' });
+    slp.resetOtpHash      = await bcrypt.hash(otpPlain, SALT_ROUNDS);
+    slp.resetOtpExpires   = Date.now() + 10 * 60 * 1000;
     await slp.save();
 
     await sendOtp(email, otpPlain);
     res.json({ ok: true });
-  } catch (e) { next(e); }
+  } catch (err) { next(err); }
 };
+
 
 export const verifyOtp = async (req, res, next) => {
   try {

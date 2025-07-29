@@ -2,9 +2,11 @@
 import AnnualGoalCategory from "../models/AnnualGoalCategory.js";
 
 /* GET  /api/annual-goals  – everyone sees the same list */
-export const list = async (_req, res, next) => {
+export const list = async (req, res, next) => {
   try {
-    const cats = await AnnualGoalCategory.find().sort({ createdAt: -1 });
+    const cats = await AnnualGoalCategory
+      .find({ slp: req.user._id })           // only mine
+      .sort({ createdAt: -1 });
     res.json(cats);
   } catch (e) {
     next(e);

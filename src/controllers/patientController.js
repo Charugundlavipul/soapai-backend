@@ -8,6 +8,14 @@ import Appointment from '../models/Appointment.js';
 import Material from "../models/Material.js";
 import mongoose from "mongoose"; 
 
+/* ───── helper: keep .progress = highest value in .history ───── */
+function recomputeOverall(row) {
+  if (row.history?.length) {
+    row.progress = Math.max(...row.history.map(h => h.progress));
+  }
+}
+
+
 /* ───────── absolute path for uploads/materials ───────── */
 const MATERIALS_DIR = path.join(process.cwd(), "uploads", "materials");
 
@@ -379,6 +387,7 @@ export const addMaterial = async (req, res, next) => {
 // server/src/controllers/patientController.js
 
 /* ────────── PATCH /api/clients/:id/goal-progress ────────── */
+/* ────────── PATCH /api/clients/:id/goal-progress ────────── */
 export const updateGoalProgress = async (req, res, next) => {
   try {
     const { id }    = req.params;
@@ -388,30 +397,61 @@ export const updateGoalProgress = async (req, res, next) => {
       return res.status(400).json({ message: "items must be an array" });
     }
 
-    // Only the owning SLP
+    /* ---------- fetch current patient ---------- */
     const patient = await Patient.findOne({ _id: id, slp: req.user._id });
     if (!patient) return res.status(404).json({ message: "Not found" });
 
-    // Replace goalProgress with the new array, casting dates to JS Date
-    patient.goalProgress = items.map((it) => ({
-      name:        it.name,
-      progress:    it.progress,
-      comment:     it.comment,
-      startDate:   it.startDate ? new Date(it.startDate) : Date.now(),
-      targetDate:  it.targetDate ? new Date(it.targetDate) : null,
-      associated:  Array.isArray(it.associated) ? it.associated.map(a => ({
-        activityName: a.activityName,
-        onDate:       a.onDate ? new Date(a.onDate) : Date.now()
-      })) : []
-    }));
+    /* ---------- map of existing goalProgress rows (before update) ---------- */
+    const current = Object.fromEntries(
+      patient.goalProgress.map(r => [r.name, r.toObject?.() ?? r])
+    );
+
+    /* ---------- merge incoming items with existing rows ---------- */
+    const merged = items.map(it => {
+      const prev = current[it.name] || {};
+
+      return {
+        name      : it.name,
+        comment   : it.comment      ?? prev.comment      ?? "",
+        startDate : it.startDate
+                      ? new Date(it.startDate)
+                      : prev.startDate  ?? Date.now(),
+        targetDate: it.targetDate
+                      ? new Date(it.targetDate)
+                      : prev.targetDate ?? null,
+        associated: Array.isArray(it.associated)
+                      ? it.associated
+                      : prev.associated ?? [],
+        history   : Array.isArray(it.history) && it.history.length
+                      ? it.history
+                      : prev.history    ?? [],
+        /* keep slider value unless history exists */
+        progress  : typeof it.progress === "number"
+                      ? it.progress
+                      : prev.progress   ?? 0
+      };
+    });
+
+    /* ---------- copy untouched goals (not present in request) ---------- */
+    const touched   = new Set(items.map(i => i.name));
+    const untouched = Object.values(current).filter(r => !touched.has(r.name));
+
+    patient.goalProgress = [...merged, ...untouched];
+
+    /* ---------- recompute .progress when history is available ---------- */
+    patient.goalProgress.forEach(row => {
+      if (row.history?.length) {
+        row.progress = Math.max(...row.history.map(h => h.progress));
+      }
+    });
 
     await patient.save();
-    // Return the full, updated goalProgress array
-    res.json(patient.goalProgress);
-  } catch (e) {
-    next(e);
+    return res.json(patient.goalProgress);
+  } catch (err) {
+    next(err);
   }
 };
+
 
 export const addGoalHistory = async (req,res,next)=>{
   const { id } = req.params;
@@ -424,25 +464,143 @@ export const addGoalHistory = async (req,res,next)=>{
     if(row){
       row.associated.push({ activityName, onDate:new Date() });
     }
+    pat.goalProgress.forEach(recomputeOverall);
   });
   await pat.save();
   res.json(pat.goalProgress);
 };
 
 // server/src/controllers/patientController.js
+/* ─── PATCH  /api/clients/:id/attendance/:apptId ─── */
 export const updateAttendanceStatus = async (req, res, next) => {
   try {
-    const { id, apptId }   = req.params;
-    const { status }       = req.body;                 // "present" | "absent"
+    const { id, apptId } = req.params;                 // patient id & appointment id
+    const { status, goals = [] } = req.body;           // "present" | "absent"
+
     if (!["present", "absent"].includes(status))
       return res.status(400).json({ message: "Invalid status" });
 
-    const pat = await Patient.findOneAndUpdate(
-      { _id: id, "attendance.appointment": apptId, slp: req.user._id },
-      { $set: { "attendance.$.status": status } },
-      { new: true, select: "attendance" }
-    );
-    if (!pat) return res.status(404).json({ message: "Not found" });
-    res.json(pat.attendance);
-  } catch (e) { next(e); }
+    /* 1️⃣  fetch patient & the appointment meta we need */
+    const [pat, appointment] = await Promise.all([
+      Patient.findOne({ _id: id, slp: req.user._id }),
+      Appointment.findById(apptId).select("dateTimeStart"),
+    ]);
+
+    if (!pat) return res.status(404).json({ message: "Patient not found" });
+
+    const apptDate = appointment?.dateTimeStart || new Date(); // fallback now()
+
+    /* 2️⃣  upsert attendance row */
+    const attRow = pat.attendance.find(a => String(a.appointment) === apptId);
+    if (attRow) {
+      attRow.status = status;
+    } else {
+      pat.attendance.push({
+        appointment: apptId,
+        date       : apptDate,
+        status,
+      });
+    }
+
+    /* 3️⃣  when **present** update goal-progress history          */
+    if (status === "present" && Array.isArray(goals) && goals.length) {
+      goals.forEach(gName => {
+        if (!pat.goals.includes(gName)) return;        // skip strangers
+
+        let gp = pat.goalProgress.find(r => r.name === gName);
+        if (!gp) {
+          gp = { name: gName, history: [] };
+          pat.goalProgress.push(gp);
+        }
+
+        const existing = gp.history.find(h => String(h.appointment) === apptId);
+        if (existing) {
+          // keep original date, only update value
+          existing.progress = gp.progress ?? 0;
+        } else {
+          gp.history.push({
+            appointment: apptId,
+            date       : apptDate,
+            progress   : gp.progress ?? 0,
+          });
+        }
+
+        // keep .progress = highest in history
+        recomputeOverall(gp);
+      });
+    }
+
+    await pat.save();
+    res.json({ attendance: pat.attendance, goalProgress: pat.goalProgress });
+  } catch (e) {
+    next(e);
+  }
+};
+
+
+/* ─── PATCH /api/clients/:id/goal-progress/:apptId ─── */
+export const upsertGoalProgressForVisit = async (req, res, next) => {
+  try {
+    const { id, apptId } = req.params;       // patient id, appointment id
+    const { goals = [], visitDate } = req.body;       // [{ name, progress }]
+
+    if (!Array.isArray(goals) || !goals.length)
+      return res.status(400).json({ message:"goals array required" });
+
+    const pat = await Patient.findOne({ _id:id, slp:req.user._id });
+    if (!pat) return res.status(404).json({ message:"Not found" });
+
+    const apptDate = visitDate ? new Date(visitDate) : new Date();
+    goals.forEach(({ name, progress }) => {
+      if (!pat.goals.includes(name)) return;          // ignore strangers
+
+      let gp = pat.goalProgress.find(r => r.name === name);
+      if (!gp) {
+        gp = { name, history:[] };
+        pat.goalProgress.push(gp);
+      }
+
+      
+      const row = gp.history.find(h => String(h.appointment) === apptId);
+      if (row) {
+        row.progress = progress;               // keep original date untouched
+      } else {
+        gp.history.push({
+          appointment: apptId,
+          date       : apptDate,               // ✅ correct stamp
+          progress
+        });
+      }
+      recomputeOverall(gp);
+    });
+
+      
+    await pat.save();
+    res.json(pat.goalProgress);
+  } catch (err) { next(err); }
+};
+
+
+// server/src/controllers/patientController.js
+export const addActivitiesToVisit = async (req, res, next) => {
+  try {
+    const { id, apptId }     = req.params;          // patient & appointment
+    const { activities = []} = req.body;            // [activityId]
+
+    if (!activities.length)
+      return res.status(400).json({ message:"activities array required" });
+
+    const pat = await Patient.findOne({ _id:id, slp:req.user._id });
+    if (!pat) return res.status(404).json({ message:"Not found" });
+
+    const visit = pat.visitHistory.find(v => String(v.appointment) === apptId);
+    if (!visit) return res.status(404).json({ message:"Visit row missing" });
+
+    activities.forEach(a => {
+      if (!visit.activities.includes(a)) visit.activities.push(a);
+    });
+
+    await pat.save();
+    res.json(visit);
+  } catch (err) { next(err); }
 };
