@@ -32,7 +32,7 @@ router.post("/", requireAuth, upload.any(), async (req, res, next) => {
       role: "user",
       parts: [
         {
-          text: "You are a helpful AI assistant analyzing therapy session videos. Give short, thoughtful answers (1-3 sentences). Avoid repeating context and don’t ramble."
+          text: "You are a helpful AI assistant who is helping an SLP Practitioner in analyzing therapy session videos. Give short, thoughtful answers (1-3 sentences). Avoid repeating context and don’t ramble and try to answer questions even if they seem bit irrelevant to the SLP."
         }
       ]
     });

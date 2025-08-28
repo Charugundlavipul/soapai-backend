@@ -1,6 +1,6 @@
 import bcrypt from 'bcryptjs';
 import Slp from '../models/Slp.js';
-import fs      from "fs"; 
+import { deleteFromMinio, uploadToMinio, BUCKETS } from '../config/minio.js';
 
 export const getProfile = (req, res) => {
   res.json({
@@ -17,13 +17,23 @@ export const updateProfile = async (req, res, next) => {
     if (name)  fields.name  = name;
     if (email) fields.email = email;
       if (req.file) {
-     // remove old file if there was one
-     if (req.user.avatarUrl?.startsWith('http')) {
-       const local = req.user.avatarUrl.replace(`${req.protocol}://${req.get('host')}`, '.');
-       if (fs.existsSync(local)) fs.unlinkSync(local);
-     }
-     fields.avatarUrl =
-       `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}`;
+      // Delete old avatar from MinIO if it exists
+      if (req.user.avatarUrl) {
+        try {
+          const oldObjectName = req.user.avatarUrl.split('/').pop();
+          await deleteFromMinio(BUCKETS.AVATARS, oldObjectName);
+        } catch (err) {
+          console.error('Error deleting old avatar:', err);
+        }
+      }
+
+      // Upload new avatar and get its URL
+      const timestamp = Date.now();
+      const fileExtension = req.file.originalname.split('.').pop();
+      const objectName = `avatar_${timestamp}_${Math.random().toString(36).substring(2)}.${fileExtension}`;
+      
+      await uploadToMinio(BUCKETS.AVATARS, objectName, req.file.buffer, req.file.mimetype);
+      fields.avatarUrl = getPublicUrl(BUCKETS.AVATARS, objectName);
    }
 
     const user = await Slp.findByIdAndUpdate(req.user._id, fields, { new: true });

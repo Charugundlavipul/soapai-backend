@@ -1,9 +1,8 @@
 // server/src/controllers/patientController.js
-import fs from 'fs';
-import path from 'path';
 import Patient from '../models/Patient.js';
 import Group   from '../models/Group.js';
 import Slp     from '../models/Slp.js';
+import { minioClient, BUCKETS, generatePresignedUrl, uploadToMinio, deleteFromMinio } from '../config/minio.js';
 import Appointment from '../models/Appointment.js';
 import Material from "../models/Material.js";
 import mongoose from "mongoose"; 
@@ -16,16 +15,7 @@ function recomputeOverall(row) {
 }
 
 
-/* ───────── absolute path for uploads/materials ───────── */
-const MATERIALS_DIR = path.join(process.cwd(), "uploads", "materials");
-
-/* make sure upload dirs exist one time at server start */
-if (!fs.existsSync(MATERIALS_DIR)) fs.mkdirSync(MATERIALS_DIR, { recursive:true });
-
-// ensure uploads/materials exists once at boot
-if (!fs.existsSync(MATERIALS_DIR)) {
-  fs.mkdirSync(MATERIALS_DIR, { recursive: true });
-}
+// MinIO buckets are initialized at server startup in config/minio.js
 // ─────────────  GET /api/clients/:id/materials  ─────────────
 
 
@@ -96,12 +86,22 @@ export const create = async (req, res, next) => {
 
 
 
+    let avatarUrl;
+    if (req.file) {
+      const filename = `avatar_${Date.now()}${path.extname(req.file.originalname)}`;
+      await uploadToMinio(
+        BUCKETS.AVATARS,
+        filename,
+        req.file.buffer,
+        req.file.mimetype
+      );
+      avatarUrl = await generatePresignedUrl(BUCKETS.AVATARS, filename);
+    }
+
     const data = {
       ...req.body,
       slp: req.user._id,
-      avatarUrl: req.file
-        ? `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}`
-        : undefined
+      avatarUrl
     };
 
     const patient = await Patient.create(data);
@@ -188,9 +188,27 @@ export const update = async (req, res, next) => {
       }
     });
 
-    // If avatar file is uploaded, replace avatarUrl
+    // If avatar file is uploaded, upload to MinIO and update avatarUrl
     if (req.file) {
-      patient.avatarUrl = `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}`;
+      // Delete old avatar if it exists
+      if (patient.avatarUrl) {
+        try {
+          const oldObjectName = patient.avatarUrl.split('/').pop();
+          await deleteFromMinio(BUCKETS.AVATARS, oldObjectName);
+        } catch (err) {
+          console.error('Error deleting old avatar:', err);
+        }
+      }
+
+      // Upload new avatar
+      const filename = `avatar_${Date.now()}${path.extname(req.file.originalname)}`;
+      await uploadToMinio(
+        BUCKETS.AVATARS,
+        filename,
+        req.file.buffer,
+        req.file.mimetype
+      );
+      patient.avatarUrl = await generatePresignedUrl(BUCKETS.AVATARS, filename);
     }
 
     // If group changed, sync group.patients arrays
@@ -229,11 +247,15 @@ export const remove = async (req, res, next) => {
       return res.status(404).json({ message: 'Not found' });
     }
 
-    // If avatarUrl is a local file, delete it from disk
-    if (patient.avatarUrl?.startsWith(`${req.protocol}://${req.get('host')}`)) {
-      const localPath = patient.avatarUrl.replace(`${req.protocol}://${req.get('host')}`, '.');
-      if (fs.existsSync(localPath)) {
-        fs.unlinkSync(localPath);
+    // Delete avatar from MinIO if it exists
+    if (patient.avatarUrl) {
+      try {
+        // Extract object name from the URL
+        const objectName = patient.avatarUrl.split('/').pop();
+        await deleteFromMinio(BUCKETS.AVATARS, objectName);
+      } catch (err) {
+        console.error('Error deleting avatar from MinIO:', err);
+        // Continue with patient deletion even if avatar deletion fails
       }
     }
 
@@ -342,18 +364,24 @@ export const addMaterial = async (req, res, next) => {
     if (!req.file)
       return res.status(400).json({ message: "No file uploaded" });
 
-    /* ---------- build nice filename & move file ---------- */
+    /* ---------- build nice filename & upload to MinIO ---------- */
     const niceDate = visitDate.slice(0, 10);               // yyyy-mm-dd
-     const safeAct  = activity.toLowerCase()
-   .replace(/[^a-z0-9]+/g, "_")
-   .replace(/^_+|_+$/g, "");   // cap length / fallback
+    const safeAct  = activity.toLowerCase()
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "");   // cap length / fallback
     const ext      = path.extname(req.file.originalname || ".pdf");
     const filename = `material_${niceDate}_${safeAct}${ext}`;
+    
+    // Upload to MinIO
+    await uploadToMinio(
+      BUCKETS.MATERIALS,
+      filename,
+      req.file.buffer,
+      req.file.mimetype
+    );
 
-    const dest = path.join(MATERIALS_DIR, filename);
-    fs.renameSync(req.file.path, dest);                    // <- move
-
-    const fileUrl = `${req.protocol}://${req.get('host')}/uploads/materials/${filename}`;     // ← static mount
+    // Generate presigned URL for the uploaded file
+    const fileUrl = await generatePresignedUrl(BUCKETS.MATERIALS, filename);
 
     /* ---------- save in embedded materials array ---------- */
     const update = {

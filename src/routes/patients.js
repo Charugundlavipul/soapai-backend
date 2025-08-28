@@ -19,14 +19,12 @@ import {
   addActivitiesToVisit
   
 } from '../controllers/patientController.js';
-import multer from 'multer';
 import { runValidation } from '../middlewares/validate.js';
 import { requireAuth }   from '../middlewares/requireAuth.js';
 import { uploader }      from '../middlewares/upload.js';
 import mongoose from "mongoose";
 const { Types } = mongoose;
 const router = Router();
-const upload = multer({ dest: "uploads" });
 
 // Validation rule: name must not be empty
 const nameV = body('name').notEmpty().withMessage('Name is required');
@@ -80,7 +78,7 @@ router.patch("/:id/attendance/:apptId", requireAuth, updateAttendanceStatus);
 router.patch('/:id/goal-progress/history', requireAuth, addGoalHistory);
 router.patch("/:id/goal-progress", requireAuth, updateGoalProgress);
 router.get ("/:id/materials",   requireAuth,            listMaterials);
-router.post("/:id/materials",   requireAuth, upload.single("file"), addMaterial);
+router.post("/:id/materials",   requireAuth, uploader.single("file"), addMaterial);
 router.patch(
   '/:id', 
   requireAuth,

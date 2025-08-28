@@ -3,6 +3,7 @@ import Appointment from '../models/Appointment.js';
 import { isBefore, isWithinInterval } from 'date-fns';
 import Group from '../models/Group.js';
 import Patient from '../models/Patient.js';
+import { deleteFromMinio, BUCKETS } from '../config/minio.js';
 
 
 const computeStatus = (start, end) => {
@@ -203,13 +204,16 @@ export const remove = async (req, res, next) => {
         });
 
         if (grp) {
-          /* unlink local avatar file (if any) */
-          if (grp.avatarUrl?.startsWith("http")) {
-            const local = grp.avatarUrl.replace(
-              `${req.protocol}://${req.get("host")}`,
-              "."
-            );
-            if (fs.existsSync(local)) fs.unlinkSync(local);
+          /* Delete avatar from MinIO if it exists */
+          if (grp.avatarUrl) {
+            try {
+              // Extract object name from the URL
+              const objectName = grp.avatarUrl.split('/').pop();
+              await deleteFromMinio(BUCKETS.AVATARS, objectName);
+            } catch (err) {
+              console.error('Error deleting avatar from MinIO:', err);
+              // Continue with group deletion even if avatar deletion fails
+            }
           }
 
           /* clear group on each patient ----------------------- */

@@ -12,9 +12,6 @@ const GEMINI_ENDPOINT =
 const PLACEHOLDER_NOTE =
   "• Therapist-note: session still awaiting AI notes.";
 
-/* ------------------------------------------------------------------
-   helpers
-------------------------------------------------------------------- */
 const buildVisitNotes = (appt, ids = []) => {
   const recMap = new Map();
   if (appt.recommendation?.individualInsights?.length) {

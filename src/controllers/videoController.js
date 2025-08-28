@@ -1,18 +1,45 @@
 // server/src/controllers/videoController.js
 import Video        from '../models/Video.js';
 import Appointment  from '../models/Appointment.js';
-import { uploader } from '../middlewares/upload.js';
 import { transcribe } from '../utils/transcribe.js';
 import Patient from '../models/Patient.js';
 import Group   from '../models/Group.js';
+import { BUCKETS, generatePresignedUrl } from '../config/minio.js';
 
-export const uploadMulter = uploader.single('video');   // mp4, mov, …
+/* ─────────────────────────  GET /api/videos  ───────────────────────── */
+export const list = async (req, res, next) => {
+  try {
+    const videos = await Video.find({ slp: req.user._id })
+      .sort({ createdAt: -1 });
+
+    // Generate fresh presigned URLs for each video
+    for (const video of videos) {
+      if (video.minioInfo?.bucketName && video.minioInfo?.objectName) {
+        video.fileUrl = await generatePresignedUrl(
+          video.minioInfo.bucketName,
+          video.minioInfo.objectName,
+          'getObject',
+          24 * 60 * 60 // 24 hours
+        );
+      }
+    }
+
+    res.json(videos);
+  } catch (e) {
+    next(e);
+  }
+};
 
 /* ─────────────────────────  POST /api/appointments/:id/video  ───────────────────────── */
 export const create = async (req, res, next) => {
   try {
     const { title, goals = [], notes } = req.body;      // ← goals
     const { id: appointment } = req.params;
+
+    // Check if MinIO file info is available
+    if (!req.minioFile) {
+      return res.status(400).json({ error: 'No file uploaded to MinIO' });
+    }
 
     /* 1️⃣  Create the Video doc (no transcript yet) */
     const video = await Video.create({
@@ -21,7 +48,12 @@ export const create = async (req, res, next) => {
       slp: req.user._id,
       goals: Array.isArray(goals) ? goals : [goals],    // ⬅️  save as simple strings
       notes,
-      fileUrl: `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}`
+      fileUrl: req.minioFile.url,
+      minioInfo: {
+        bucketName: req.minioFile.bucketName,
+        objectName: req.minioFile.objectName,
+        originalName: req.minioFile.originalName
+      }
     });
 
     /* 2️⃣  Back-link to the appointment */
@@ -66,8 +98,13 @@ export const create = async (req, res, next) => {
     /* 4️⃣  Fire-and-forget Whisper transcription */
     (async () => {
       try {
-        const transcript = await transcribe(req.file.path);      // [{start,end,text}]
-        await Video.findByIdAndUpdate(video._id, { transcript });
+        // For MinIO, we need to handle transcription differently
+        // We'll need to download the file temporarily or use a streaming approach
+        // For now, we'll skip transcription until we implement MinIO-compatible transcription
+        console.log('Transcription skipped - MinIO integration pending');
+        // TODO: Implement MinIO-compatible transcription
+        // const transcript = await transcribe(req.file.path);
+        // await Video.findByIdAndUpdate(video._id, { transcript });
       } catch (err) {
         console.error('Transcription failed:', err.message);
       }
@@ -86,6 +123,17 @@ export const getOne = async (req, res, next) => {
       slp: req.user._id
     });                              // ⬅️  no populate needed – goals are strings
     if (!vid) return res.status(404).json({ message: 'Not found' });
+    
+    // Generate fresh presigned URL if MinIO info exists
+    if (vid.minioInfo?.bucketName && vid.minioInfo?.objectName) {
+      vid.fileUrl = await generatePresignedUrl(
+        vid.minioInfo.bucketName,
+        vid.minioInfo.objectName,
+        'getObject',
+        24 * 60 * 60 // 24 hours
+      );
+    }
+    
     res.json(vid);
   } catch (e) { next(e); }
 };

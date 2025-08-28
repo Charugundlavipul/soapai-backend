@@ -1,112 +1,77 @@
-import { spawn }       from "child_process";
-import path            from "path";
-import { json } from "stream/consumers";
-import { fileURLToPath } from "url";
 
-// restore __dirname in ESM
-const __filename = fileURLToPath(import.meta.url);
-const __dirname  = path.dirname(__filename);
+import dotenv from "dotenv";
+import { minioClient, BUCKETS } from '../config/minio.js';
 
-// point at your venv’s python
-const isWin = process.platform === "win32";
-const VENV_ROOT = path.resolve(__dirname, "../../.venv");
-const PYTHON = isWin
-  ? path.join(VENV_ROOT, "Scripts", "python.exe")
-  : path.join(VENV_ROOT, "bin", "python");
-// export async function transcribe(videoPath) {
-//   return new Promise((resolve, reject) => {
-//     const script = path.resolve(__dirname, "../scripts/transcribe.py");
-//     const py = spawn("python", [script, videoPath], {
-//       stdio: ["ignore","pipe","pipe"]
-//     });
+// Load environment variables
+dotenv.config();
 
-//     let out = "", err = "";
-//     py.stdout.on("data", chunk => out += chunk.toString());
-//     py.stderr.on("data", chunk => err += chunk.toString());
+// NEW OPENAI WHISPER API IMPLEMENTATION
+export async function transcribe(objectName) {
+  try {
+    // Check if OpenAI API key is available
+    const openaiApiKey = process.env.OPENAI_API_KEY;
+    if (!openaiApiKey) {
+      throw new Error("OPENAI_API_KEY not found in environment variables");
+    }
 
-//     py.on("error", reject);
-//     py.on("close", code => {
-//       if (code !== 0) {
-//         return reject(new Error(`Transcription failed (${code}):\n${err}`));
-//       }
+    // Get the video buffer from MinIO
+    const videoBuffer = await new Promise((resolve, reject) => {
+      let buffers = [];
+      minioClient.getObject(BUCKETS.VIDEOS, objectName)
+        .then(stream => {
+          stream.on('data', chunk => buffers.push(chunk));
+          stream.on('end', () => resolve(Buffer.concat(buffers)));
+          stream.on('error', err => reject(err));
+        })
+        .catch(err => reject(err));
+    });
+    
+    // Create form data for OpenAI API
+    const FormData = (await import('form-data')).default;
+    const form = new FormData();
+    form.append('file', videoBuffer, {
+      filename: 'video.webm',
+      contentType: 'video/webm'
+    });
+    form.append('model', 'whisper-1');
+    form.append('response_format', 'verbose_json');
+    form.append('timestamp_granularities', 'segment');
 
-      
-//       const start = out.indexOf('[');
-//       const end   = out.lastIndexOf(']');
-//       if (start === -1 || end === -1 || end < start) {
-//         return reject(new Error("No valid JSON array found in transcriber output"));
-//       }
+    // Make request to OpenAI Whisper API
+    const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${openaiApiKey}`,
+        ...form.getHeaders()
+      },
+      body: form
+    });
 
-      
-//       const jsonText = out.slice(start, end + 1).trim();
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(`OpenAI API error: ${errorData.error?.message || response.statusText}`);
+    }
 
-      
-//       try {
-      
-//         const segments = JSON.parse(jsonText);
-//         resolve(segments);
-//       } catch (e) {
-//         reject(new Error("Invalid JSON from transcriber: " + e.message));
-//       }
-//     });
-//   });
-// }
+    const result = await response.json();
+    
+    // Transform OpenAI response to match expected format
+    const segments = result.segments.map(segment => ({
+      start: segment.start,
+      end: segment.end,
+      text: segment.text.trim()
+    }));
 
+    return segments;
+  } catch (error) {
+    console.error('OpenAI Whisper transcription failed:', error);
+    throw new Error(`Transcription failed: ${error.message}`);
+  }
+}
+
+// Helper function to parse time strings (kept for compatibility)
 function parseTimeToSeconds(ts) {
   const parts = ts.split(':').map(Number);
   if (parts.length === 2) return parts[0] * 60 + parts[1];
   if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
   return Number(ts) || 0;
-}
-
-export async function transcribe(videoPath) {
-  return new Promise((resolve, reject) => {
-    const script = path.resolve(__dirname, '../scripts/transcribe.py');
-    const py = spawn('python', [script, videoPath]);
-
-    let out = '', err = '';
-    py.stdout.on('data', c => out += c.toString());
-    py.stderr.on('data', c => err += c.toString());
-
-    py.on('error', reject);
-    py.on('close', code => {
-      if (code !== 0) {
-        return reject(new Error(`Transcription failed (${code}):\n${err}`));
-      }
-
-      // ① find the first '['
-      const first = out.indexOf('[');
-      if (first < 0) {
-        return reject(new Error(`No JSON array found in transcriber output.`));
-      }
-      // ② walk forward to find the matching ']'
-      let depth = 0, endIdx = -1;
-      for (let i = first; i < out.length; i++) {
-        if (out[i] === '[') depth++;
-        else if (out[i] === ']') {
-          depth--;
-          if (depth === 0) { endIdx = i; break; }
-        }
-      }
-      if (endIdx < 0) {
-        return reject(new Error(`Incomplete JSON array in transcriber output.`));
-      }
-
-      const jsonText = out.slice(first, endIdx + 1);
-      let raw;
-      try {
-        raw = JSON.parse(jsonText);
-      } catch (e) {
-        return reject(new Error(`Invalid JSON from transcriber: ${e.message}`));
-      }
-
-      // convert times into numbers
-      const segments = raw.map(s => ({
-        start: parseTimeToSeconds(s.start),
-        end:   parseTimeToSeconds(s.end),
-        text:  s.text.trim()
-      }));
-      resolve(segments);
-    });
-  });
 }

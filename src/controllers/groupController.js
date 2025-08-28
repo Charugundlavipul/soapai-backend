@@ -1,10 +1,9 @@
 // server/src/controllers/groupController.js
 import mongoose    from "mongoose";
-import fs          from "fs";
-
 import Group       from "../models/Group.js";
 import Patient     from "../models/Patient.js";
 import Appointment from "../models/Appointment.js";
+import { deleteFromMinio, uploadToMinio, BUCKETS } from '../config/minio.js';
 
 /* ────────────────────────────────────────────────────────────
    GET /api/groups  → list all groups for the signed-in SLP
@@ -54,12 +53,26 @@ export const create = async (req, res, next) => {
     if (ok !== patients.length)
       return res.status(400).json({ message: "Invalid member list" });
 
+    /* Upload avatar to MinIO if provided */
+    let avatarUrl;
+    if (req.file) {
+      const timestamp = Date.now();
+      const fileExtension = req.file.originalname.split('.').pop();
+      const objectName = `group_avatar_${timestamp}_${Math.random().toString(36).substring(2)}.${fileExtension}`;
+      
+      await uploadToMinio(
+        BUCKETS.AVATARS,
+        objectName,
+        req.file.buffer,
+        req.file.mimetype
+      );
+      avatarUrl = getPublicUrl(BUCKETS.AVATARS, objectName);
+    }
+
     /* create the group */
     const group = await Group.create({
       name,
-      avatarUrl: req.file
-        ? `${req.protocol}://${req.get("host")}/uploads/${req.file.filename}`
-        : undefined,
+      avatarUrl,
       patients,
       goals,
       slp: req.user._id
@@ -82,10 +95,16 @@ export const remove = async (req, res, next) => {
     const group = await Group.findOneAndDelete({ _id: id, slp: req.user._id });
     if (!group) return res.status(404).json({ message: "Not found" });
 
-    /* delete local avatar file (if any) */
-    if (group.avatarUrl?.startsWith(`${req.protocol}://${req.get("host")}`)) {
-      const localPath = group.avatarUrl.replace(`${req.protocol}://${req.get("host")}`, ".");
-      if (fs.existsSync(localPath)) fs.unlinkSync(localPath);
+    /* delete avatar from MinIO if it exists */
+    if (group.avatarUrl) {
+      try {
+        // Extract object name from the URL
+        const objectName = group.avatarUrl.split('/').pop();
+        await deleteFromMinio(BUCKETS.AVATARS, objectName);
+      } catch (err) {
+        console.error('Error deleting avatar from MinIO:', err);
+        // Continue with group deletion even if avatar deletion fails
+      }
     }
 
     /* clear patients.group field */

@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# DEPRECATED: This Python script is no longer used for transcription.
+# The system now uses OpenAI Whisper API instead.
+# This file is kept for reference but can be safely removed.
+
 import sys, json, tempfile, subprocess, os, logging
 import whisper
 
